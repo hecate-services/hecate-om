@@ -1,0 +1,31 @@
+{application, hecate_om, [
+    {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
+    {vsn, "0.1.0"},
+    {registered, [hecate_om_sup]},
+    {mod, {hecate_om_app, []}},
+    {applications, [
+        kernel,
+        stdlib,
+        crypto,
+        cowboy,
+        jsx,
+        macula
+    ]},
+    {env, [
+        %% Service-principal cert path. The container mounts
+        %% /etc/hecate/secrets/<service-name> read-only on this path
+        %% (Quadlet maps the per-service host directory to it).
+        {service_cert_path, "/etc/hecate/secrets/service-cert.pem"},
+        %% Station socket exposed by the local macula-station unit.
+        {station_socket,    "/run/macula/station.sock"},
+        %% Loopback health endpoint port.
+        {health_port,       8470},
+        %% Prefix for capability advertisements on the mesh bloom channel.
+        {capability_topic,  <<"_mesh.cap.">>}
+    ]},
+    {modules, []},
+    {licenses, ["Apache-2.0"]},
+    {links, [
+        {"Codeberg", "https://codeberg.org/hecate-services/hecate-om"}
+    ]}
+]}.

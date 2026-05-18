@@ -1,0 +1,45 @@
+# Quadlet unit for {{service_name}}.
+#
+# Runs on Hecate INFRASTRUCTURE nodes (BEAM cluster, dedicated relay
+# boxes, cooperative-contributed service nodes). NOT on user laptops.
+#
+# Lives in hecate-gitops/system/ and is symlinked into
+# /etc/containers/systemd/ by the reconciler. Managed by the
+# system-wide systemd, not a user instance.
+
+[Unit]
+Description=Hecate service: {{service_name}}
+After=network-online.target macula-station.service
+Wants=network-online.target
+Requires=macula-station.service
+
+[Container]
+ContainerName={{service_name}}
+Image=ghcr.io/hecate-services/{{service_name}}:latest
+AutoUpdate=registry
+
+# Realm-issued service-principal cert (read-only). Provisioned via
+# hecate-realm at install time, not derived from a human user.
+Volume=/etc/hecate/secrets/{{service_name}}:/etc/hecate/secrets:ro,Z
+
+# Per-service state — bulk drive on the beam nodes (`/bulk0`).
+Volume=/bulk0/hecate/{{service_name}}:/var/lib/{{service_name}}:Z
+
+# Local macula-station socket (the SDK speaks to this).
+Volume=/run/macula:/run/macula:Z
+
+# Health endpoint (loopback only, for podman HEALTHCHECK).
+PublishPort=127.0.0.1:8470:8470
+
+# Run as the dedicated `hecate` service user, never root.
+User=hecate
+Group=hecate
+
+EnvironmentFile=/etc/hecate/gitops/system/{{service_name}}.env
+
+[Service]
+Restart=always
+RestartSec=10s
+
+[Install]
+WantedBy=multi-user.target

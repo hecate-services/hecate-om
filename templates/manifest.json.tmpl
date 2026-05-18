@@ -1,0 +1,28 @@
+{
+  "name": "{{service_name}}",
+  "display_name": "{{display_name}}",
+  "version": "0.1.0",
+  "description": "{{description}}",
+  "service_type": "container_daemon",
+  "tenancy": "realm",
+  "runs_on": "infrastructure_node",
+  "callback_module": "{{erlang_service_module}}",
+  "image": "ghcr.io/hecate-services/{{service_name}}",
+  "repository": "https://codeberg.org/hecate-services/{{service_name}}",
+  "license": "Apache-2.0",
+  "depends_on": [
+    "macula-station",
+    "hecate-realm"
+  ],
+  "capabilities": [],
+  "ports": {
+    "health": 8470
+  },
+  "volumes": {
+    "secrets": "/etc/hecate/secrets/{{service_name}}",
+    "state":   "/var/lib/{{service_name}}",
+    "station_socket": "/run/macula"
+  },
+  "min_realm_version": "0.6.0",
+  "min_station_version": "0.1.0"
+}

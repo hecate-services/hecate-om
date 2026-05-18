@@ -1,0 +1,34 @@
+%%% @doc {{display_name}} — implements the hecate_om_service behaviour.
+-module({{erlang_service_module}}).
+-behaviour(hecate_om_service).
+
+-export([info/0, start/1, stop/1, health/0, capabilities/0, identity_spec/0]).
+
+info() ->
+    #{
+        name        => <<"{{service_name}}">>,
+        version     => <<"0.1.0">>,
+        description => <<"{{description}}">>
+    }.
+
+start(_Opts) ->
+    {{erlang_app_name}}_sup:start_link().
+
+stop(_State) ->
+    ok.
+
+health() ->
+    %% TODO: replace with a real health probe of the service.
+    ok.
+
+capabilities() ->
+    %% TODO: list capabilities this service exposes on the mesh.
+    [].
+
+identity_spec() ->
+    #{
+        scope     => <<"{{service_name}}">>,
+        actions   => [<<"publish_summary">>, <<"answer_query">>],
+        resources => [<<"{{service_name}}/*">>],
+        ttl_days  => 30
+    }.
