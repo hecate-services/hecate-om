@@ -1,6 +1,6 @@
 {application, hecate_om, [
     {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
-    {vsn, "0.1.0"},
+    {vsn, "0.2.0"},
     {registered, [hecate_om_sup]},
     {mod, {hecate_om_app, []}},
     {applications, [
@@ -16,10 +16,26 @@
         %% /etc/hecate/secrets/<service-name> read-only on this path
         %% (Quadlet maps the per-service host directory to it).
         {service_cert_path, "/etc/hecate/secrets/service-cert.pem"},
-        %% Station socket exposed by the local macula-station unit.
+
+        %% Realm tag (32-byte binary). Operator pins this via the
+        %% per-service env file in hecate-gitops. May also be supplied
+        %% as a 64-char hex binary. v2 will extract from the
+        %% service-principal cert instead.
+        %% {realm, <<...32 bytes...>>}
+
+        %% Seeds for the local macula-station. Each seed is a binary
+        %% URL ("quic://host:port"), a string, or a map
+        %% (#{host=>..., port=>...}). Empty list = run offline (the
+        %% service stays up but can't reach the mesh).
+        {station_seeds, []},
+
+        %% Station socket path (advisory — used by future seed-
+        %% inference logic; the SDK currently takes host/port seeds).
         {station_socket,    "/run/macula/station.sock"},
+
         %% Loopback health endpoint port.
         {health_port,       8470},
+
         %% Prefix for capability advertisements on the mesh bloom channel.
         {capability_topic,  <<"_mesh.cap.">>}
     ]},
