@@ -1,9 +1,9 @@
-%%% @doc Publishes a service's capability list onto the mesh's
-%%% bloom-advertise channel.
+%%% @doc Publishes a service's capability list onto the realm's
+%%% capability-advertise channel.
 %%%
-%%% Other services / plugins finding capabilities call
-%%% `hecate_om_capabilities:lookup/1`. v1 walks the per-station
-%%% peer_blooms; v2 caches at the SDK layer.
+%%% Other services and plugins discover capabilities by subscribing
+%%% to `_mesh.cap.<service-name>` and aggregating the resulting
+%%% per-station summaries.
 -module(hecate_om_capabilities).
 -behaviour(gen_server).
 
@@ -33,12 +33,16 @@ init([]) ->
     {ok, #state{}}.
 
 handle_call({register, Caps}, _From, S) ->
+    %% Auto-publish on register; consumers can call publish/0 again
+    %% later for manual refresh.
+    do_publish(Caps),
     {reply, ok, S#state{capabilities = Caps}};
 handle_call(publish, _From, #state{capabilities = Caps} = S) ->
     do_publish(Caps),
     {reply, ok, S};
 handle_call({lookup, _Name}, _From, S) ->
     %% TODO: query the bloom-advertised peer set + return matching peers.
+    %% Needs macula:subscribe + accumulator.
     {reply, {ok, []}, S};
 handle_call(list, _From, #state{capabilities = Caps} = S) ->
     {reply, Caps, S};
@@ -51,7 +55,39 @@ terminate(_Reason, _State) -> ok.
 
 %%% Internals
 
-do_publish(_Caps) ->
-    %% TODO: hecate_om_identity:macula_client/0 →
-    %% macula:publish(Client, ?_mesh.cap.<service>, summary_payload).
-    ok.
+do_publish(Caps) ->
+    case {hecate_om_identity:macula_client(), hecate_om_identity:realm()} of
+        {{ok, Pool}, {ok, Realm}} ->
+            ServiceName = service_name_or_unknown(),
+            Topic   = topic_for(ServiceName),
+            Payload = summary_payload(ServiceName, Caps),
+            try macula:publish(Pool, Realm, Topic, Payload)
+            catch _:_ -> ok
+            end;
+        _ ->
+            %% No client or no realm yet — skip silently. publish/0
+            %% will be called again on the next capability refresh.
+            ok
+    end.
+
+topic_for(ServiceName) when is_binary(ServiceName) ->
+    Prefix = application:get_env(hecate_om, capability_topic, <<"_mesh.cap.">>),
+    <<Prefix/binary, ServiceName/binary>>.
+
+summary_payload(ServiceName, Caps) ->
+    #{
+        type         => capability_summary,
+        service      => ServiceName,
+        capabilities => Caps,
+        published_at => erlang:system_time(millisecond)
+    }.
+
+service_name_or_unknown() ->
+    case hecate_om:service_module() of
+        undefined -> <<"unknown">>;
+        Mod ->
+            try maps:get(name, Mod:info()) of
+                Name when is_binary(Name) -> Name
+            catch _:_ -> <<"unknown">>
+            end
+    end.
