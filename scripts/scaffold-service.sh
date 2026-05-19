@@ -31,7 +31,7 @@ DISPLAY_NAME="${DISPLAY_NAME^}"  # capitalise first letter
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEMPLATES="$(cd "$HERE/../templates" && pwd)"
 
-mkdir -p "$TARGET"/{src,apps,quadlet,.github/workflows,test,guides,scripts}
+mkdir -p "$TARGET"/{src,apps,quadlet,config,.github/workflows,test,guides,scripts}
 
 render() {
     local in="$1" out="$2"
@@ -51,6 +51,7 @@ render "$TEMPLATES/manifest.json.tmpl"       "$TARGET/manifest.json"
 render "$TEMPLATES/ci-build-push.yml.tmpl"   "$TARGET/.github/workflows/build-push.yml"
 render "$TEMPLATES/_app.erl.tmpl"            "$TARGET/src/${ERLANG_APP}_app.erl"
 render "$TEMPLATES/_service.erl.tmpl"        "$TARGET/src/${ERLANG_SERVICE_MOD}.erl"
+render "$TEMPLATES/sys.config.src.tmpl"      "$TARGET/config/sys.config.src"
 
 echo
 echo "Service skeleton ready at $TARGET"

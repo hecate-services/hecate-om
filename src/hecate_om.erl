@@ -34,9 +34,30 @@ boot(ServiceMod) ->
 -spec boot(module(), map()) -> {ok, pid()} | {error, term()}.
 boot(ServiceMod, Opts) when is_atom(ServiceMod), is_map(Opts) ->
     persistent_term:put(?SERVICE_MODULE_KEY, ServiceMod),
+    ok = maybe_wire_store(ServiceMod),
     ok = hecate_om_capabilities:register(ServiceMod:capabilities()),
     ok = hecate_om_health:register(ServiceMod),
     ServiceMod:start(Opts).
+
+%% @private When the service module exports both `store_id/0` and
+%% `data_dir/0`, treat it as a CMD/PRJ service that owns a reckon-db
+%% store. Wire the canonical pattern before the service's own
+%% start/1 runs. Producer-only services omit the callbacks and pay
+%% nothing.
+maybe_wire_store(ServiceMod) ->
+    _ = code:ensure_loaded(ServiceMod),
+    Has = erlang:function_exported(ServiceMod, store_id, 0) andalso
+          erlang:function_exported(ServiceMod, data_dir, 0),
+    case Has of
+        false -> ok;
+        true ->
+            StoreId = ServiceMod:store_id(),
+            DataDir = ServiceMod:data_dir(),
+            case hecate_om_store:ensure(StoreId, DataDir) of
+                ok           -> ok;
+                {error, Why} -> error({hecate_om_store_failed, ServiceMod, Why})
+            end
+    end.
 
 -spec service_module() -> module() | undefined.
 service_module() ->

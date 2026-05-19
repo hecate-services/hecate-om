@@ -1,8 +1,20 @@
 %%% @doc {{display_name}} — implements the hecate_om_service behaviour.
+%%%
+%%% This template includes the optional `store_id/0` + `data_dir/0`
+%%% callbacks for CMD/PRJ services that own a reckon-db store. If
+%%% your service is producer-only (no event store of its own),
+%%% remove both callbacks AND the reckon_db / evoq blocks from
+%%% sys.config.src.
 -module({{erlang_service_module}}).
 -behaviour(hecate_om_service).
 
 -export([info/0, start/1, stop/1, health/0, capabilities/0, identity_spec/0]).
+
+%% Optional callbacks: CMD/PRJ services own a reckon-db store.
+%% hecate_om:boot/1 picks these up and runs the canonical wiring
+%% (reckon_db_sup:start_store + evoq_store_subscription:start_link)
+%% before start/1 fires.
+-export([store_id/0, data_dir/0]).
 
 info() ->
     #{
@@ -32,3 +44,15 @@ identity_spec() ->
         resources => [<<"{{service_name}}/*">>],
         ttl_days  => 30
     }.
+
+%% @doc The reckon-db store_id this service owns. Reads from app env
+%% so deployments can override.
+store_id() ->
+    {ok, Id} = application:get_env({{erlang_app_name}}, event_store_id),
+    Id.
+
+%% @doc On-disk root for the store. Reads from app env; sys.config
+%% sets the default to "${HECATE_DATA_DIR}".
+data_dir() ->
+    {ok, Dir} = application:get_env({{erlang_app_name}}, data_dir),
+    Dir.

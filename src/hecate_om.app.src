@@ -1,6 +1,6 @@
 {application, hecate_om, [
     {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
-    {vsn, "0.2.0"},
+    {vsn, "0.3.0"},
     {registered, [hecate_om_sup]},
     {mod, {hecate_om_app, []}},
     {applications, [
@@ -9,7 +9,13 @@
         crypto,
         cowboy,
         jsx,
-        macula
+        macula,
+        %% Used by hecate_om_store when a service module exports
+        %% store_id/0 + data_dir/0. Hard deps so CMD/PRJ services
+        %% get the canonical reckon-db + evoq wiring for free.
+        reckon_db,
+        evoq,
+        reckon_evoq
     ]},
     {env, [
         %% Service-principal cert path. The container mounts
