@@ -11,7 +11,7 @@ Versioning: [SemVer](https://semver.org/).
 - `hecate_om_store` module: canonical reckon-db + evoq wiring helper.
   Encapsulates `reckon_db_sup:start_store/1` + 30s readiness wait +
   `evoq_store_subscription:start_link/1`. The pattern documented as
-  mandatory in `hecate-agents/skills/ANTIPATTERNS_EVENT_SOURCING.md`
+  mandatory in `hecate-corpus/skills/ANTIPATTERNS_EVENT_SOURCING.md`
   now lives in one place.
 - Optional callbacks on `hecate_om_service`: `store_id/0` and
   `data_dir/0`. When a service module exports both, `hecate_om:boot/1`

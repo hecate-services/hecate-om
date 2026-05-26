@@ -67,8 +67,8 @@ Layer 1 — identity    hecate-realm / macula-realm
 Layer 0 — kernel      macula-station
 ```
 
-See [`philosophy/HECATE_TIER_MODEL.md`](https://codeberg.org/hecate-social/hecate-agents/src/branch/main/philosophy/HECATE_TIER_MODEL.md)
-in hecate-agents for the longer cut-criteria discussion.
+See [`philosophy/HECATE_TIER_MODEL.md`](https://codeberg.org/hecate-social/hecate-corpus/src/branch/main/philosophy/HECATE_TIER_MODEL.md)
+in hecate-corpus for the longer cut-criteria discussion.
 
 ## The contract
 

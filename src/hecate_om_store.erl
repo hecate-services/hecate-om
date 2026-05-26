@@ -2,7 +2,7 @@
 %%%
 %%% Encapsulates the "start a store, wait for it, start the
 %%% per-store evoq subscription" pattern documented as MANDATORY in
-%%% `hecate-social/hecate-agents/skills/ANTIPATTERNS_EVENT_SOURCING.md`.
+%%% `hecate-social/hecate-corpus/skills/ANTIPATTERNS_EVENT_SOURCING.md`.
 %%%
 %%% Services don't call this module directly — `hecate_om:boot/1`
 %%% dispatches here when the service module exports the optional
