@@ -1,6 +1,6 @@
 {application, hecate_om, [
     {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
-    {vsn, "0.3.0"},
+    {vsn, "0.3.1"},
     {registered, [hecate_om_sup]},
     {mod, {hecate_om_app, []}},
     {applications, [
