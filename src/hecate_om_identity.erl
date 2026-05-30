@@ -46,7 +46,7 @@ init([]) ->
         {error, _} -> undefined
     end,
     Realm = load_realm(),
-    Client = attach_client(Cert),
+    Client = attach_client(),
     {ok, #state{cert = Cert, client = Client, realm = Realm}}.
 
 handle_call(service_cert, _From, #state{cert = undefined} = S) ->
@@ -94,26 +94,45 @@ load_realm() ->
             undefined
     end.
 
-%% @doc Connect to the local macula-station. Degrades gracefully if
-%% the station isn't reachable (no station socket, no seeds, etc.) —
-%% the gen_server stays up and `macula_client/0` returns `no_client`
-%% to consumers.
-attach_client(undefined) ->
-    %% No cert means no identity to attach with; staying offline.
-    undefined;
-attach_client(_Cert) ->
-    Seeds = configured_seeds(),
-    Opts  = #{},  %% TODO: pass realm-signed identity once realm extraction lands
-    case Seeds of
+%% @doc Connect to the mesh when station seeds are configured. The macula
+%% SDK auto-generates an ephemeral identity for empty opts (the proven path
+%% the hecate-daemon uses); when a stable on-disk service keypair is
+%% configured (`identity_key_path') we pass it so the service peers under a
+%% consistent node id across restarts. Degrades to `no_client' (the
+%% gen_server stays up) if seeds are unset or unreachable.
+%%
+%% NOTE: connection no longer depends on the realm-signed cert. The macula
+%% `identity' opt wants a raw Ed25519 keypair, not a cert, and the mesh does
+%% not yet verify realm membership at connect/publish — so requiring a cert
+%% to connect was spurious (it kept every service dark). The cert is still
+%% loaded + held (`service_cert/0') for the v2 swap-in, when the SDK enforces
+%% realm-signed identity and this is where it gets passed.
+attach_client() ->
+    case configured_seeds() of
         [] ->
             undefined;
-        _ ->
-            try macula:connect(Seeds, Opts) of
+        Seeds ->
+            try macula:connect(Seeds, identity_opts()) of
                 {ok, Pool}     -> Pool;
                 {error, _Why}  -> undefined
             catch
                 _:_ -> undefined
             end
+    end.
+
+%% Use a stable on-disk service keypair (macula-native format, via
+%% `macula_identity:save/2') when one is configured + loadable; otherwise
+%% let the SDK auto-generate an ephemeral identity. Either way the service
+%% connects and can publish — the identity is for peering, not authorization.
+identity_opts() ->
+    case application:get_env(hecate_om, identity_key_path) of
+        {ok, Path} ->
+            case macula_identity:load(Path) of
+                {ok, KeyPair} -> #{identity => KeyPair};
+                {error, _}    -> #{}
+            end;
+        undefined ->
+            #{}
     end.
 
 configured_seeds() ->
