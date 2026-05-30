@@ -28,6 +28,9 @@
     realm     :: binary() | undefined   %% 32-byte realm tag
 }).
 
+%% Retry cadence for (re)attaching the mesh pool.
+-define(RECONNECT_MS, 5000).
+
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
@@ -46,8 +49,13 @@ init([]) ->
         {error, _} -> undefined
     end,
     Realm = load_realm(),
-    Client = attach_client(),
-    {ok, #state{cert = Cert, client = Client, realm = Realm}}.
+    %% Connect off the init path and retry. At boot hecate_om may start
+    %% before the macula SDK app is fully up, so a single inline connect
+    %% races it and loses (the bug that kept services dark even with seeds).
+    %% handle_info(connect) attempts + reschedules until a pool attaches,
+    %% and re-attaches if the pool later dies.
+    self() ! connect,
+    {ok, #state{cert = Cert, client = undefined, realm = Realm}}.
 
 handle_call(service_cert, _From, #state{cert = undefined} = S) ->
     {reply, {error, no_cert}, S};
@@ -68,7 +76,26 @@ handle_call(_Msg, _From, S) ->
     {reply, {error, unknown_call}, S}.
 
 handle_cast(_Msg, S) -> {noreply, S}.
-handle_info(_Msg, S) -> {noreply, S}.
+
+handle_info(connect, #state{client = undefined} = S) ->
+    case attach_client() of
+        undefined ->
+            erlang:send_after(?RECONNECT_MS, self(), connect),
+            {noreply, S};
+        Pool ->
+            _ = is_pid(Pool) andalso erlang:monitor(process, Pool),
+            {noreply, S#state{client = Pool}}
+    end;
+handle_info(connect, S) ->
+    %% Already connected.
+    {noreply, S};
+handle_info({'DOWN', _Ref, process, Pool, _Reason}, #state{client = Pool} = S) ->
+    %% The mesh pool died — drop it and reconnect.
+    self() ! connect,
+    {noreply, S#state{client = undefined}};
+handle_info(_Msg, S) ->
+    {noreply, S}.
+
 terminate(_Reason, _State) -> ok.
 
 %%% Internals
