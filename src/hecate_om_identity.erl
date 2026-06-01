@@ -1,11 +1,11 @@
 %%% @doc Loads the service-principal cert at boot and a Macula SDK
 %%% client handle. Held in a gen_server so every other process can
-%%% borrow the pool through `hecate_om:macula_client/0`.
+%%% borrow the pool through `hecate_om:macula_client/0'.
 %%%
 %%% Each hecate-service has its OWN realm-signed credential (NOT a
 %%% user's). The credential lives at /etc/hecate/secrets/service-cert.pem
 %%% inside the container; the host mounts the per-service directory
-%%% from /etc/hecate/secrets/<service-name>/ onto that path.
+%%% from `/etc/hecate/secrets/<service-name>/' onto that path.
 %%%
 %%% v1: long-lived realm-signed cert provisioned out-of-band by a
 %%% realm-admin script. v2: short-lived UCAN auto-rotated from a
@@ -13,8 +13,8 @@
 %%% consumers.
 %%%
 %%% Connect-degradation: when seeds aren't reachable (early boot,
-%%% test harness, no station nearby), `macula_client/0` returns
-%%% `{error, no_client}` and consumers should fall back to no-op
+%%% test harness, no station nearby), `macula_client/0' returns
+%%% `{error, no_client}' and consumers should fall back to no-op
 %%% behaviour. The service stays up; it just doesn't talk to the mesh.
 -module(hecate_om_identity).
 -behaviour(gen_server).
@@ -109,7 +109,7 @@ load_cert() ->
     end.
 
 %% @doc Realm tag = 32-byte binary. v1: read from env (operator
-%% pins it via `hecate-gitops/system/<service>.env`). v2: extract
+%% pins it via `hecate-gitops/system/<service>.env'). v2: extract
 %% from the service-principal cert at boot.
 load_realm() ->
     case application:get_env(hecate_om, realm) of

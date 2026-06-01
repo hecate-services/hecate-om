@@ -5,6 +5,29 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-06-01
+
+### Fixed
+- **Mesh connect no longer gated on the service-principal cert.**
+  hecate_om_identity:attach_client/1 previously short-circuited to
+  `undefined` (never calling macula:connect/2) whenever the cert file was
+  absent, leaving every cert-less service permanently `no_client`. The cert
+  was a spurious gate: it is never passed to `connect` (the SDK
+  auto-generates an ephemeral peering identity for empty opts), only loaded
+  and held for `service_cert/0` / the v2 realm-membership swap-in. Connect
+  now keys off configured `station_seeds`, not cert presence.
+- **Connect is deferred off the init path and retried.** At boot `hecate_om`
+  could start before the macula SDK app was fully up; a single inline connect
+  raced it and lost. `init/1` now schedules `self() ! connect`, retries every
+  `?RECONNECT_MS` until a pool attaches, monitors the pool, and re-attaches
+  if it later dies.
+
+### Added
+- Optional `identity_key_path` env: when set + loadable, the service peers
+  under a stable on-disk macula-native keypair (consistent node id across
+  restarts) via `#{identity => KeyPair}`; otherwise the SDK auto-generates an
+  ephemeral identity. Identity is for peering, not authorization.
+
 ## [0.3.0] - 2026-05-19
 
 ### Added

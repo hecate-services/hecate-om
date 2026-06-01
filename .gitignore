@@ -8,3 +8,6 @@ rebar3.crashdump
 .idea/
 *.swp
 .DS_Store
+
+# ex_doc / edoc generated output
+/doc/

@@ -1,7 +1,7 @@
 %%% @doc Cowboy handler — GET /health.
 %%%
-%%% Returns 200 + JSON when the service is `ok`; 503 + JSON for
-%%% `{degraded, _}` or `{down, _}`. Podman's HEALTHCHECK and
+%%% Returns 200 + JSON when the service is `ok'; 503 + JSON for
+%%% `{degraded, _}' or `{down, _}'. Podman's HEALTHCHECK and
 %%% Kubernetes-style liveness probes consume this.
 -module(hecate_om_health_handler).
 

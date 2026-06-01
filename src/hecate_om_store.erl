@@ -2,11 +2,11 @@
 %%%
 %%% Encapsulates the "start a store, wait for it, start the
 %%% per-store evoq subscription" pattern documented as MANDATORY in
-%%% `hecate-social/hecate-corpus/skills/ANTIPATTERNS_EVENT_SOURCING.md`.
+%%% `hecate-social/hecate-corpus/skills/ANTIPATTERNS_EVENT_SOURCING.md'.
 %%%
-%%% Services don't call this module directly — `hecate_om:boot/1`
+%%% Services don't call this module directly — `hecate_om:boot/1'
 %%% dispatches here when the service module exports the optional
-%%% `store_id/0` + `data_dir/0` callbacks from `hecate_om_service`.
+%%% `store_id/0' + `data_dir/0' callbacks from `hecate_om_service'.
 %%%
 %%% The sys.config for any service that uses this helper MUST also
 %%% set evoq's adapter to reckon_evoq_adapter:
@@ -43,8 +43,8 @@ ensure(StoreId, DataDir) when is_atom(StoreId) ->
         {error, _}=E -> E
     end.
 
-%% @doc Idempotent. Starts a `single`-mode reckon_db_store at
-%% `<DataDir>/<StoreId>/` and waits for it to register.
+%% @doc Idempotent. Starts a `single'-mode reckon_db_store at
+%% `<DataDir>/<StoreId>/' and waits for it to register.
 -spec ensure_store(atom(), file:filename_all()) -> ok | {error, term()}.
 ensure_store(StoreId, DataDir) when is_atom(StoreId) ->
     SubDir = filename:join(DataDir, atom_to_list(StoreId)),

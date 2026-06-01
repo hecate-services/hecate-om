@@ -4,16 +4,16 @@
 %%%
 %%% Two roles in one worker:
 %%%
-%%%   - Publisher: every `register/1` or `publish/0` call republishes
+%%%   - Publisher: every `register/1' or `publish/0' call republishes
 %%%     this service's capability summary onto `<<"_mesh.cap.announce">>'.
 %%%   - Subscriber: at boot (and on every reconfigure), subscribes to
-%%%     the same topic; inbound summaries land in `handle_info/2` and
+%%%     the same topic; inbound summaries land in `handle_info/2' and
 %%%     update the `peer_caps' map.
 %%%
-%%% Other services / plugins call `lookup/1` with a capability name
+%%% Other services / plugins call `lookup/1' with a capability name
 %%% (`<<"hecate-rag.answer_query">>') and get back the list of
 %%% services that advertised it. Caller uses that list to pick a
-%%% target for `macula:call/5`.
+%%% target for `macula:call/5'.
 -module(hecate_om_capabilities).
 -behaviour(gen_server).
 

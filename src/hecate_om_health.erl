@@ -1,8 +1,8 @@
 %%% @doc Tracks a single service's health snapshot.
 %%%
-%%% Exposed over HTTP by `hecate_om_health_handler` (Cowboy) at
-%%% `GET /health` on port `health_port` (default 8470). Podman's
-%%% HEALTHCHECK and systemd's `EXEC_START` Readiness mechanics use it.
+%%% Exposed over HTTP by `hecate_om_health_handler' (Cowboy) at
+%%% `GET /health' on port `health_port' (default 8470). Podman's
+%%% HEALTHCHECK and systemd's `EXEC_START' Readiness mechanics use it.
 -module(hecate_om_health).
 -behaviour(gen_server).
 
