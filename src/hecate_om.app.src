@@ -1,6 +1,6 @@
 {application, hecate_om, [
     {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
-    {vsn, "0.3.1"},
+    {vsn, "0.3.2"},
     {registered, [hecate_om_sup]},
     {mod, {hecate_om_app, []}},
     {applications, [
@@ -29,10 +29,15 @@
         %% service-principal cert instead.
         %% {realm, <<...32 bytes...>>}
 
-        %% Seeds for the local macula-station. Each seed is a binary
-        %% URL ("quic://host:port"), a string, or a map
+        %% Station seeds the service dials over QUIC. Each seed is a
+        %% binary URL ("quic://host:port"), a string, or a map
         %% (#{host=>..., port=>...}). Empty list = run offline (the
         %% service stays up but can't reach the mesh).
+        %%
+        %% Precedence: the MACULA_STATION_SEEDS env var (comma-separated
+        %% URLs) overrides this list when set — lets one deployed image
+        %% dial a distinct station per instance without a rebuild. See
+        %% hecate_om_identity:configured_seeds/0.
         {station_seeds, []},
 
         %% Station socket path (advisory — used by future seed-

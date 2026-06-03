@@ -5,6 +5,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-06-03
+
+### Added
+- **`MACULA_STATION_SEEDS` env override for station seeds.** When set
+  (comma-separated station URLs), it takes precedence over the
+  `station_seeds` app env in `hecate_om_identity:configured_seeds/0`;
+  empty/unset falls back to the app env. Lets one deployed image dial a
+  distinct station per instance without a rebuild (e.g. one bot per node,
+  one station each), matching the existing seed-via-env convention.
+
 ## [0.3.1] - 2026-06-01
 
 ### Fixed

@@ -162,11 +162,29 @@ identity_opts() ->
             #{}
     end.
 
+%% Station seeds, in precedence order:
+%%   1. MACULA_STATION_SEEDS env var (comma-separated URLs) — lets each
+%%      deployed instance dial a distinct station without rebuilding the
+%%      image (e.g. one mpong-bot per beam node, one station each).
+%%   2. `station_seeds' app env (sys.config default).
 configured_seeds() ->
+    case parse_seed_csv(os:getenv("MACULA_STATION_SEEDS")) of
+        []    -> app_env_seeds();
+        Seeds -> Seeds
+    end.
+
+app_env_seeds() ->
     case application:get_env(hecate_om, station_seeds) of
         {ok, Seeds} when is_list(Seeds) -> Seeds;
         _                                -> []
     end.
+
+parse_seed_csv(false) -> [];
+parse_seed_csv(Csv) ->
+    [list_to_binary(Trimmed)
+     || Part <- string:split(Csv, ",", all),
+        Trimmed <- [string:trim(Part)],
+        Trimmed =/= ""].
 
 decode_hex(Hex) ->
     << <<(list_to_integer([A,B], 16))>> || <<A:8, B:8>> <= Hex >>.
