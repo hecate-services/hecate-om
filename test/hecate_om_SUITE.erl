@@ -19,18 +19,19 @@ end_per_suite(_Config) ->
     ok.
 
 behaviour_attributes(_Config) ->
-    %% hecate_om_service declares 6 required callbacks + 2 optional ones
-    %% (store_id/0, data_dir/0) for CMD/PRJ services that wire a reckon-db
-    %% store. behaviour_info(callbacks) returns all 8.
+    %% hecate_om_service declares 6 required callbacks + 3 optional ones
+    %% (store_id/0, data_dir/0, store_indexes/0) for CMD/PRJ services that
+    %% wire a reckon-db store. behaviour_info(callbacks) returns all 9.
     Callbacks = hecate_om_service:behaviour_info(callbacks),
-    ?assertEqual(8, length(Callbacks)),
+    ?assertEqual(9, length(Callbacks)),
     Names = lists:sort(lists:map(fun({N, _A}) -> N end, Callbacks)),
     Expected = lists:sort([info, start, stop, health, capabilities,
-                           identity_spec, store_id, data_dir]),
+                           identity_spec, store_id, data_dir, store_indexes]),
     ?assertEqual(Expected, Names),
-    %% store_id/0 + data_dir/0 must be the optional pair.
+    %% store_id/0 + data_dir/0 + store_indexes/0 must be the optional set.
     Optional = lists:sort(hecate_om_service:behaviour_info(optional_callbacks)),
-    ?assertEqual(lists:sort([{store_id, 0}, {data_dir, 0}]), Optional).
+    ?assertEqual(lists:sort([{store_id, 0}, {data_dir, 0}, {store_indexes, 0}]),
+                 Optional).
 
 boot_dummy_service(_Config) ->
     {ok, _Pid} = hecate_om:boot(dummy_service, #{}),
