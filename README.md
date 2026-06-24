@@ -122,6 +122,38 @@ else (release tarball, container image, Quadlet unit, manifest, health
 endpoint wiring, mesh advertisement) is provided by `hecate-om` + the
 template generators in `templates/`.
 
+## Optional: store-backed services
+
+CMD/PRJ services that own a `reckon-db` event store export three more
+**optional** callbacks. When a service exports `store_id/0` + `data_dir/0`,
+`hecate_om:boot/1` auto-starts the store and its evoq subscription *before*
+`start/1` runs — you never call `reckon_db_sup:start_store/1` yourself.
+Producer-only services (no store) omit these and pay nothing.
+
+```erlang
+%% Optional store-wiring callbacks (only if the service owns a store)
+-export([store_id/0, data_dir/0, store_indexes/0]).
+
+%% Atom store id. Data lands at <data_dir>/<store_id>/.
+store_id() -> my_service_store.
+
+data_dir() -> "/var/lib/hecate-my-service".
+
+%% reckon-db secondary index declarations installed on the store. This is
+%% how CCC payload indexes get declared — without it the store starts with
+%% no secondary indexes and payload/hash queries find nothing.
+store_indexes() ->
+    [tags, event_type,
+     {payload, <<"plate">>},                            %% single-field index
+     {payload_hash, [<<"lot_id">>, <<"plate">>]}].      %% composite hash index
+```
+
+`store_indexes/0` is itself optional: export it only when the store needs
+secondary indexes. Omit it (or return `[]`) for a store with none.
+
+> Requires `hecate_om >= 0.3.4`. (0.3.3 introduced the callback but failed
+> to export the helper it calls, crashing boot — use 0.3.4+.)
+
 ## Scaffold a new service
 
 ```bash

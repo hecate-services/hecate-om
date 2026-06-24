@@ -71,6 +71,48 @@ That's the whole user-side surface. Health endpoint, mesh
 advertisement, identity loading, container packaging — all handled
 by `hecate_om` + the templates.
 
+## Store-backed services (optional)
+
+A CMD/PRJ service that owns a `reckon-db` event store exports three more
+**optional** callbacks. When both `store_id/0` and `data_dir/0` are present,
+`hecate_om:boot/1` auto-wires the store and its evoq subscription during
+`maybe_wire_store`, *before* `start/1` runs — so the store is already up
+when your supervisor boots. You never call `reckon_db_sup:start_store/1`
+directly.
+
+```erlang
+-export([store_id/0, data_dir/0, store_indexes/0]).
+
+store_id()   -> my_service_store.            %% atom; data at <data_dir>/<store_id>/
+data_dir()   -> "/var/lib/hecate-my-service".
+
+%% reckon-db secondary indexes installed on the auto-started store. This is
+%% the ONLY place CCC payload indexes get declared for an auto-wired store —
+%% declaring them in your own start/1 is too late (the store is already up,
+%% so start_store returns {already_started} and your indexes are dropped).
+store_indexes() ->
+    [tags, event_type,
+     {payload, <<"plate">>},
+     {payload_hash, [<<"lot_id">>, <<"plate">>]}].
+```
+
+`store_indexes/0` is itself optional — omit it (or return `[]`) for a store
+with no secondary indexes. Boot threads its result into the `#store_config{}`
+so `reckon_db_index_config` registers the declarations; the gateway's CCC
+payload/hash queries then resolve against them. Requires `hecate_om >= 0.3.4`.
+
+Boot order with a store:
+
+```
+hecate_X_app:start/2 → hecate_om:boot(hecate_X_service)
+   ↓
+hecate_om:maybe_wire_store/1   (store_id/0 + data_dir/0 present?)
+   ├── reckon_db_sup:start_store(#store_config{indexes = store_indexes()})
+   └── evoq_store_subscription:start_link(store_id())
+   ↓
+hecate_X_service:start/1 → hecate_X_sup:start_link()   (store already up)
+```
+
 ## Vertical slicing inside
 
 A service may host its own CMD / PRJ / QRY tier internally. Same
