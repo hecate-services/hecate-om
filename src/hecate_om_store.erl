@@ -38,7 +38,14 @@
 %% and data_dir/0.
 -spec ensure(atom(), file:filename_all()) -> ok | {error, term()}.
 ensure(StoreId, DataDir) when is_atom(StoreId) ->
-    case ensure_store(StoreId, DataDir) of
+    ensure(StoreId, DataDir, []).
+
+%% @doc As ensure/2, but installs the given reckon-db secondary index
+%% declarations on the store (so CCC payload indexes are declared at
+%% start). Pass [] for a store with no secondary indexes.
+-spec ensure(atom(), file:filename_all(), [term()]) -> ok | {error, term()}.
+ensure(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) ->
+    case ensure_store(StoreId, DataDir, Indexes) of
         ok           -> ensure_subscription(StoreId);
         {error, _}=E -> E
     end.
@@ -47,12 +54,17 @@ ensure(StoreId, DataDir) when is_atom(StoreId) ->
 %% `<DataDir>/<StoreId>/' and waits for it to register.
 -spec ensure_store(atom(), file:filename_all()) -> ok | {error, term()}.
 ensure_store(StoreId, DataDir) when is_atom(StoreId) ->
+    ensure_store(StoreId, DataDir, []).
+
+-spec ensure_store(atom(), file:filename_all(), [term()]) -> ok | {error, term()}.
+ensure_store(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) ->
     SubDir = filename:join(DataDir, atom_to_list(StoreId)),
     ok = filelib:ensure_path(SubDir),
     Config = #store_config{
         store_id          = StoreId,
         data_dir          = SubDir,
         mode              = single,
+        indexes           = Indexes,
         writer_pool_size  = 5,
         reader_pool_size  = 5,
         gateway_pool_size = 1,

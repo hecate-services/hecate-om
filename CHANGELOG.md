@@ -5,6 +5,24 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-06-24
+
+### Added
+- **Optional `store_indexes/0` service callback.** When a service exports it
+  alongside `store_id/0` + `data_dir/0`, `hecate_om:boot/1` installs the
+  returned reckon-db secondary index declarations (e.g. `{payload, Key}`,
+  `{payload_hash, [Keys]}`) on the auto-started store. Previously the
+  auto-wired store was created with **no** indexes, so a service that also
+  declared indexes via its own `start_store` call hit `{already_started}`
+  and its declarations were silently dropped — CCC payload indexes never got
+  registered. `hecate_om_store:ensure/3` and `ensure_store/3` carry the index
+  list; the `/2` arities delegate with `[]`.
+
+### Changed
+- Bumped the reckon-db stack pins to the current ecosystem: `reckon_db
+  ~> 5.4` (was `~> 2.3` — needed for the `#store_config.indexes` field),
+  `evoq ~> 1.21` (was `~> 1.15`), `reckon_evoq ~> 2.6` (was `~> 2.1`).
+
 ## [0.3.2] - 2026-06-03
 
 ### Added

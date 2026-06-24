@@ -61,4 +61,12 @@
      "The store data lands at data_dir/store_id.".
 -callback data_dir() -> string().
 
--optional_callbacks([store_id/0, data_dir/0]).
+-doc "OPTIONAL. The reckon-db secondary index declarations this service's "
+     "store maintains, e.g. [tags, event_type, {payload, <<\"plate\">>}, "
+     "{payload_hash, [<<\"lot_id\">>, <<\"plate\">>]}]. When exported "
+     "alongside store_id/0 + data_dir/0, hecate_om:boot/1 installs these on "
+     "the auto-started store so CCC payload indexes are declared. Omit for a "
+     "store with no secondary indexes.".
+-callback store_indexes() -> [term()].
+
+-optional_callbacks([store_id/0, data_dir/0, store_indexes/0]).

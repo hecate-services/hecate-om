@@ -53,10 +53,20 @@ maybe_wire_store(ServiceMod) ->
         true ->
             StoreId = ServiceMod:store_id(),
             DataDir = ServiceMod:data_dir(),
-            case hecate_om_store:ensure(StoreId, DataDir) of
+            Indexes = store_indexes(ServiceMod),
+            case hecate_om_store:ensure(StoreId, DataDir, Indexes) of
                 ok           -> ok;
                 {error, Why} -> error({hecate_om_store_failed, ServiceMod, Why})
             end
+    end.
+
+%% Optional store_indexes/0 callback: the service's declared secondary
+%% index list. Defaults to [] (no indexes) when the service doesn't
+%% export it.
+store_indexes(ServiceMod) ->
+    case erlang:function_exported(ServiceMod, store_indexes, 0) of
+        true  -> ServiceMod:store_indexes();
+        false -> []
     end.
 
 -spec service_module() -> module() | undefined.
