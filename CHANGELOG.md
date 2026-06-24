@@ -5,6 +5,14 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-06-24
+
+### Fixed
+- **`hecate_om_store:ensure/3` and `ensure_store/3` were not exported** in
+  0.3.3, so `hecate_om:boot/1`'s cross-module call crashed with `undef` at
+  boot (`{hecate_om_store_failed, ..., undef}`). The store-index wiring added
+  in 0.3.3 was therefore dead on arrival. Added both to `-export`.
+
 ## [0.3.3] - 2026-06-24
 
 ### Added

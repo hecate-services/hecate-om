@@ -27,7 +27,9 @@
 -include_lib("reckon_db/include/reckon_db.hrl").
 
 -export([ensure/2,
+         ensure/3,
          ensure_store/2,
+         ensure_store/3,
          ensure_subscription/1,
          wait_for_store/2]).
 
