@@ -54,7 +54,8 @@ maybe_wire_store(ServiceMod) ->
             StoreId = ServiceMod:store_id(),
             DataDir = ServiceMod:data_dir(),
             Indexes = store_indexes(ServiceMod),
-            case hecate_om_store:ensure(StoreId, DataDir, Indexes) of
+            Mode    = store_mode(ServiceMod),
+            case hecate_om_store:ensure(StoreId, DataDir, Indexes, Mode) of
                 ok           -> ok;
                 {error, Why} -> error({hecate_om_store_failed, ServiceMod, Why})
             end
@@ -67,6 +68,16 @@ store_indexes(ServiceMod) ->
     case erlang:function_exported(ServiceMod, store_indexes, 0) of
         true  -> ServiceMod:store_indexes();
         false -> []
+    end.
+
+%% Optional store_mode/0 callback: `single' (default) or `cluster'.
+%% `cluster' makes reckon-db form a Ra cluster across every node that
+%% starts the same store_id. Defaults to `single' for services that
+%% don't export it (backward compatible).
+store_mode(ServiceMod) ->
+    case erlang:function_exported(ServiceMod, store_mode, 0) of
+        true  -> ServiceMod:store_mode();
+        false -> single
     end.
 
 -spec service_module() -> module() | undefined.

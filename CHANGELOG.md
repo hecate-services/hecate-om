@@ -5,6 +5,17 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-02
+
+### Added
+- **Optional `store_mode/0` service callback** — `single` (default) or
+  `cluster`. When a service exports it, `hecate_om:boot/1` auto-starts its
+  reckon-db store in that mode; `cluster` enables reckon-db discovery + Ra
+  clustering so the store spans every node that starts the same `store_id`.
+  New `hecate_om_store:ensure/4` + `ensure_store/4` carry the mode; the
+  `/2` and `/3` arities keep defaulting to `single` (backward compatible).
+  Previously the auto-started store was always `single`, with no override.
+
 ## [0.3.4] - 2026-06-24
 
 ### Fixed

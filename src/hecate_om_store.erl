@@ -28,8 +28,10 @@
 
 -export([ensure/2,
          ensure/3,
+         ensure/4,
          ensure_store/2,
          ensure_store/3,
+         ensure_store/4,
          ensure_subscription/1,
          wait_for_store/2]).
 
@@ -47,7 +49,16 @@ ensure(StoreId, DataDir) when is_atom(StoreId) ->
 %% start). Pass [] for a store with no secondary indexes.
 -spec ensure(atom(), file:filename_all(), [term()]) -> ok | {error, term()}.
 ensure(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) ->
-    case ensure_store(StoreId, DataDir, Indexes) of
+    ensure(StoreId, DataDir, Indexes, single).
+
+%% @doc As ensure/3, but starts the store in the given mode. `cluster'
+%% enables reckon-db's discovery + Ra clustering (a store spans every
+%% node that starts it under the same store_id); `single' is a
+%% standalone store. Driven by the optional store_mode/0 service callback.
+-spec ensure(atom(), file:filename_all(), [term()], single | cluster) ->
+    ok | {error, term()}.
+ensure(StoreId, DataDir, Indexes, Mode) when is_atom(StoreId), is_list(Indexes) ->
+    case ensure_store(StoreId, DataDir, Indexes, Mode) of
         ok           -> ensure_subscription(StoreId);
         {error, _}=E -> E
     end.
@@ -60,12 +71,17 @@ ensure_store(StoreId, DataDir) when is_atom(StoreId) ->
 
 -spec ensure_store(atom(), file:filename_all(), [term()]) -> ok | {error, term()}.
 ensure_store(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) ->
+    ensure_store(StoreId, DataDir, Indexes, single).
+
+-spec ensure_store(atom(), file:filename_all(), [term()], single | cluster) ->
+    ok | {error, term()}.
+ensure_store(StoreId, DataDir, Indexes, Mode) when is_atom(StoreId), is_list(Indexes) ->
     SubDir = filename:join(DataDir, atom_to_list(StoreId)),
     ok = filelib:ensure_path(SubDir),
     Config = #store_config{
         store_id          = StoreId,
         data_dir          = SubDir,
-        mode              = single,
+        mode              = Mode,
         indexes           = Indexes,
         writer_pool_size  = 5,
         reader_pool_size  = 5,

@@ -69,4 +69,12 @@
      "store with no secondary indexes.".
 -callback store_indexes() -> [term()].
 
--optional_callbacks([store_id/0, data_dir/0, store_indexes/0]).
+-doc "OPTIONAL. The reckon-db store mode: `single' (default) or `cluster'. "
+     "`cluster' makes reckon-db discover peers and form a Ra cluster across "
+     "every node that starts the same store_id (RF = number of such nodes). "
+     "When exported alongside store_id/0 + data_dir/0, hecate_om:boot/1 "
+     "auto-starts the store in this mode. Omit for a standalone single-node "
+     "store.".
+-callback store_mode() -> single | cluster.
+
+-optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0]).
