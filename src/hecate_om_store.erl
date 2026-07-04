@@ -29,9 +29,11 @@
 -export([ensure/2,
          ensure/3,
          ensure/4,
+         ensure/5,
          ensure_store/2,
          ensure_store/3,
          ensure_store/4,
+         ensure_store/5,
          ensure_subscription/1,
          wait_for_store/2]).
 
@@ -58,7 +60,16 @@ ensure(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) ->
 -spec ensure(atom(), file:filename_all(), [term()], single | cluster) ->
     ok | {error, term()}.
 ensure(StoreId, DataDir, Indexes, Mode) when is_atom(StoreId), is_list(Indexes) ->
-    case ensure_store(StoreId, DataDir, Indexes, Mode) of
+    ensure(StoreId, DataDir, Indexes, Mode, disabled).
+
+%% @doc As ensure/4, with an explicit reckon-db integrity config
+%% (`disabled' or `#{enabled => true, key_source => ...}'). Driven by the
+%% optional store_integrity/0 service callback.
+-spec ensure(atom(), file:filename_all(), [term()], single | cluster, term()) ->
+    ok | {error, term()}.
+ensure(StoreId, DataDir, Indexes, Mode, Integrity)
+  when is_atom(StoreId), is_list(Indexes) ->
+    case ensure_store(StoreId, DataDir, Indexes, Mode, Integrity) of
         ok           -> ensure_subscription(StoreId);
         {error, _}=E -> E
     end.
@@ -76,6 +87,12 @@ ensure_store(StoreId, DataDir, Indexes) when is_atom(StoreId), is_list(Indexes) 
 -spec ensure_store(atom(), file:filename_all(), [term()], single | cluster) ->
     ok | {error, term()}.
 ensure_store(StoreId, DataDir, Indexes, Mode) when is_atom(StoreId), is_list(Indexes) ->
+    ensure_store(StoreId, DataDir, Indexes, Mode, disabled).
+
+-spec ensure_store(atom(), file:filename_all(), [term()], single | cluster, term()) ->
+    ok | {error, term()}.
+ensure_store(StoreId, DataDir, Indexes, Mode, Integrity)
+  when is_atom(StoreId), is_list(Indexes) ->
     SubDir = filename:join(DataDir, atom_to_list(StoreId)),
     ok = filelib:ensure_path(SubDir),
     Config = #store_config{
@@ -83,6 +100,7 @@ ensure_store(StoreId, DataDir, Indexes, Mode) when is_atom(StoreId), is_list(Ind
         data_dir          = SubDir,
         mode              = Mode,
         indexes           = Indexes,
+        integrity         = Integrity,
         writer_pool_size  = 5,
         reader_pool_size  = 5,
         gateway_pool_size = 1,

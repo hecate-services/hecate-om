@@ -77,4 +77,13 @@
      "store.".
 -callback store_mode() -> single | cluster.
 
--optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0]).
+-doc "OPTIONAL. The reckon-db integrity config for the store: `disabled' "
+     "(default), or `#{enabled => true, key_source => {env_var, Name} | "
+     "{sealed_file, Path}}' to enable per-store HMAC event tamper-resistance. "
+     "When exported, hecate_om:boot/1 threads it into the store config. The "
+     "store refuses to start if integrity is enabled but the key cannot be "
+     "loaded, so provision the key before enabling.".
+-callback store_integrity() -> disabled | map().
+
+-optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0,
+                     store_integrity/0]).

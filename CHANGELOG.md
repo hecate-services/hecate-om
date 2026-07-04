@@ -5,6 +5,16 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-04
+
+### Added
+
+- Optional `store_integrity/0` service callback. When exported, `hecate_om:boot/1`
+  threads its value (`disabled`, or `#{enabled => true, key_source => ...}`) into
+  the reckon-db store config, enabling per-store HMAC event tamper-resistance.
+  Defaults to `disabled` (backward compatible). `hecate_om_store:ensure/5` +
+  `ensure_store/5` accept the integrity config explicitly.
+
 ## [0.4.0] - 2026-07-02
 
 ### Added

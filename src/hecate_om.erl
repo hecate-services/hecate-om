@@ -55,7 +55,8 @@ maybe_wire_store(ServiceMod) ->
             DataDir = ServiceMod:data_dir(),
             Indexes = store_indexes(ServiceMod),
             Mode    = store_mode(ServiceMod),
-            case hecate_om_store:ensure(StoreId, DataDir, Indexes, Mode) of
+            Integ   = store_integrity(ServiceMod),
+            case hecate_om_store:ensure(StoreId, DataDir, Indexes, Mode, Integ) of
                 ok           -> ok;
                 {error, Why} -> error({hecate_om_store_failed, ServiceMod, Why})
             end
@@ -78,6 +79,16 @@ store_mode(ServiceMod) ->
     case erlang:function_exported(ServiceMod, store_mode, 0) of
         true  -> ServiceMod:store_mode();
         false -> single
+    end.
+
+%% Optional store_integrity/0 callback: the reckon-db integrity config
+%% (`disabled', or `#{enabled => true, key_source => {env_var, Name}}').
+%% Enables per-store HMAC event tamper-resistance. Defaults to `disabled'
+%% for services that don't export it (backward compatible).
+store_integrity(ServiceMod) ->
+    case erlang:function_exported(ServiceMod, store_integrity, 0) of
+        true  -> ServiceMod:store_integrity();
+        false -> disabled
     end.
 
 -spec service_module() -> module() | undefined.
