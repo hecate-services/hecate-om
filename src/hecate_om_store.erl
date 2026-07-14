@@ -120,16 +120,18 @@ wait_for_store(StoreId, TimeoutMs) ->
     wait_loop(StoreId, Deadline).
 
 wait_loop(StoreId, Deadline) ->
-    case lists:member(StoreId, safe_which_stores()) of
-        true  -> ok;
-        false ->
-            case erlang:monotonic_time(millisecond) > Deadline of
-                true  -> {error, {store_not_ready, StoreId}};
-                false ->
-                    timer:sleep(100),
-                    wait_loop(StoreId, Deadline)
-            end
-    end.
+    wait_ready(lists:member(StoreId, safe_which_stores()), StoreId, Deadline).
+
+wait_ready(true, _StoreId, _Deadline) ->
+    ok;
+wait_ready(false, StoreId, Deadline) ->
+    wait_retry(erlang:monotonic_time(millisecond) > Deadline, StoreId, Deadline).
+
+wait_retry(true, StoreId, _Deadline) ->
+    {error, {store_not_ready, StoreId}};
+wait_retry(false, StoreId, Deadline) ->
+    timer:sleep(100),
+    wait_loop(StoreId, Deadline).
 
 safe_which_stores() ->
     try reckon_db_sup:which_stores()

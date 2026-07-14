@@ -118,28 +118,28 @@ terminate(_, _) -> ok.
 %%% Internals
 
 do_publish(Caps) ->
-    case {hecate_om_identity:macula_client(), hecate_om_identity:realm()} of
-        {{ok, Pool}, {ok, Realm}} ->
-            ServiceName = service_name_or_unknown(),
-            Payload = summary_payload(ServiceName, Caps),
-            try macula:publish(Pool, Realm, ?ANNOUNCE_TOPIC, Payload)
-            catch _:_ -> ok
-            end;
-        _ ->
-            %% No client / no realm yet — skip silently. register/1 +
-            %% publish/0 will retry on the next caller-driven call.
-            ok
-    end.
+    publish_summary(hecate_om_identity:macula_client(),
+                    hecate_om_identity:realm(), Caps).
+
+publish_summary({ok, Pool}, {ok, Realm}, Caps) ->
+    Payload = summary_payload(service_name_or_unknown(), Caps),
+    try macula:publish(Pool, Realm, ?ANNOUNCE_TOPIC, Payload)
+    catch _:_ -> ok
+    end;
+%% No client / no realm yet — skip silently. register/1 + publish/0 retry on the
+%% next caller-driven call.
+publish_summary(_Client, _Realm, _Caps) ->
+    ok.
 
 subscribe_announce() ->
-    case {hecate_om_identity:macula_client(), hecate_om_identity:realm()} of
-        {{ok, Pool}, {ok, Realm}} ->
-            try macula:subscribe(Pool, Realm, ?ANNOUNCE_TOPIC, self())
-            catch C:R -> {error, {C, R}}
-            end;
-        _ ->
-            {error, not_configured}
-    end.
+    do_subscribe(hecate_om_identity:macula_client(), hecate_om_identity:realm()).
+
+do_subscribe({ok, Pool}, {ok, Realm}) ->
+    try macula:subscribe(Pool, Realm, ?ANNOUNCE_TOPIC, self())
+    catch C:R -> {error, {C, R}}
+    end;
+do_subscribe(_Client, _Realm) ->
+    {error, not_configured}.
 
 summary_payload(ServiceName, Caps) ->
     #{
@@ -150,13 +150,14 @@ summary_payload(ServiceName, Caps) ->
     }.
 
 service_name_or_unknown() ->
-    case hecate_om:service_module() of
-        undefined -> <<"unknown">>;
-        Mod ->
-            try maps:get(name, Mod:info()) of
-                Name when is_binary(Name) -> Name
-            catch _:_ -> <<"unknown">>
-            end
+    name_of(hecate_om:service_module()).
+
+name_of(undefined) ->
+    <<"unknown">>;
+name_of(Mod) ->
+    try maps:get(name, Mod:info()) of
+        Name when is_binary(Name) -> Name
+    catch _:_ -> <<"unknown">>
     end.
 
 fresh(#{published_at := T}, NowMs) when is_integer(T) ->

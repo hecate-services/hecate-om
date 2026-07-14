@@ -11,23 +11,22 @@ routes() ->
     [{"/health", ?MODULE, []}].
 
 init(Req0, State) ->
-    case hecate_om:health() of
-        ok ->
-            Mod  = hecate_om:service_module(),
-            Info = case Mod of
-                undefined -> #{};
-                _         -> Mod:info()
-            end,
-            Body = jsx:encode(Info#{status => <<"ok">>}),
-            Req  = cowboy_req:reply(200,
-                                    #{<<"content-type">> => <<"application/json">>},
-                                    Body, Req0),
-            {ok, Req, State};
-        {degraded, Reason} ->
-            reply_unhealthy(503, <<"degraded">>, Reason, Req0, State);
-        {down, Reason} ->
-            reply_unhealthy(503, <<"down">>, Reason, Req0, State)
-    end.
+    reply(hecate_om:health(), Req0, State).
+
+reply(ok, Req0, State) ->
+    Info = service_info(hecate_om:service_module()),
+    Body = jsx:encode(Info#{status => <<"ok">>}),
+    Req  = cowboy_req:reply(200,
+                            #{<<"content-type">> => <<"application/json">>},
+                            Body, Req0),
+    {ok, Req, State};
+reply({degraded, Reason}, Req0, State) ->
+    reply_unhealthy(503, <<"degraded">>, Reason, Req0, State);
+reply({down, Reason}, Req0, State) ->
+    reply_unhealthy(503, <<"down">>, Reason, Req0, State).
+
+service_info(undefined) -> #{};
+service_info(Mod)       -> Mod:info().
 
 reply_unhealthy(Code, Status, Reason, Req0, State) ->
     Body = jsx:encode(#{

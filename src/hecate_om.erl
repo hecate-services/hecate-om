@@ -48,19 +48,22 @@ maybe_wire_store(ServiceMod) ->
     _ = code:ensure_loaded(ServiceMod),
     Has = erlang:function_exported(ServiceMod, store_id, 0) andalso
           erlang:function_exported(ServiceMod, data_dir, 0),
-    case Has of
-        false -> ok;
-        true ->
-            StoreId = ServiceMod:store_id(),
-            DataDir = ServiceMod:data_dir(),
-            Indexes = store_indexes(ServiceMod),
-            Mode    = store_mode(ServiceMod),
-            Integ   = store_integrity(ServiceMod),
-            case hecate_om_store:ensure(StoreId, DataDir, Indexes, Mode, Integ) of
-                ok           -> ok;
-                {error, Why} -> error({hecate_om_store_failed, ServiceMod, Why})
-            end
-    end.
+    wire_store(Has, ServiceMod).
+
+wire_store(false, _ServiceMod) ->
+    ok;
+wire_store(true, ServiceMod) ->
+    StoreId = ServiceMod:store_id(),
+    DataDir = ServiceMod:data_dir(),
+    Indexes = store_indexes(ServiceMod),
+    Mode    = store_mode(ServiceMod),
+    Integ   = store_integrity(ServiceMod),
+    ensured(hecate_om_store:ensure(StoreId, DataDir, Indexes, Mode, Integ), ServiceMod).
+
+ensured(ok, _ServiceMod) ->
+    ok;
+ensured({error, Why}, ServiceMod) ->
+    error({hecate_om_store_failed, ServiceMod, Why}).
 
 %% Optional store_indexes/0 callback: the service's declared secondary
 %% index list. Defaults to [] (no indexes) when the service doesn't

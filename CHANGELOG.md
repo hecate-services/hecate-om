@@ -5,6 +5,23 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-14
+
+### Fixed
+
+- `GET /health` is now actually served. `hecate_om_health_handler` defined the
+  route but nothing ever mounted it on a listener, so `/health` was dead code
+  and every hecate_om service reported unhealthy to Podman/k8s (nothing bound
+  `health_port`). `hecate_om_sup` now starts a Cowboy listener on `health_port`,
+  dispatching to the handler — gated on a valid `health_port`, so a service that
+  wants no HTTP health endpoint simply omits the config. `snapshot/0` already
+  calls the registered service's `health/0` live, so a healthy service returns
+  200.
+
+### Changed
+
+- `macula` dependency bumped to `~> 5.1` (connect-hang fix).
+
 ## [0.5.0] - 2026-07-04
 
 ### Added

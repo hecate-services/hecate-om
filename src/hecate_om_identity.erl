@@ -135,16 +135,16 @@ load_realm() ->
 %% loaded + held (`service_cert/0') for the v2 swap-in, when the SDK enforces
 %% realm-signed identity and this is where it gets passed.
 attach_client() ->
-    case configured_seeds() of
-        [] ->
-            undefined;
-        Seeds ->
-            try macula:connect(Seeds, identity_opts()) of
-                {ok, Pool}     -> Pool;
-                {error, _Why}  -> undefined
-            catch
-                _:_ -> undefined
-            end
+    connect_seeds(configured_seeds()).
+
+connect_seeds([]) ->
+    undefined;
+connect_seeds(Seeds) ->
+    try macula:connect(Seeds, identity_opts()) of
+        {ok, Pool}    -> Pool;
+        {error, _Why} -> undefined
+    catch
+        _:_ -> undefined
     end.
 
 %% Use a stable on-disk service keypair (macula-native format, via
@@ -152,15 +152,15 @@ attach_client() ->
 %% let the SDK auto-generate an ephemeral identity. Either way the service
 %% connects and can publish — the identity is for peering, not authorization.
 identity_opts() ->
-    case application:get_env(hecate_om, identity_key_path) of
-        {ok, Path} ->
-            case macula_identity:load(Path) of
-                {ok, KeyPair} -> #{identity => KeyPair};
-                {error, _}    -> #{}
-            end;
-        undefined ->
-            #{}
-    end.
+    identity_from(application:get_env(hecate_om, identity_key_path)).
+
+identity_from({ok, Path}) ->
+    loaded_identity(macula_identity:load(Path));
+identity_from(undefined) ->
+    #{}.
+
+loaded_identity({ok, KeyPair}) -> #{identity => KeyPair};
+loaded_identity({error, _})    -> #{}.
 
 %% Station seeds, in precedence order:
 %%   1. MACULA_STATION_SEEDS env var (comma-separated URLs) — lets each
