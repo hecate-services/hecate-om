@@ -11,6 +11,12 @@ all() ->
     [behaviour_attributes, boot_dummy_service, health_snapshot].
 
 init_per_suite(Config) ->
+    %% Bind the /health listener on an OS-assigned ephemeral port so the
+    %% suite never collides with a real service (or a prior run's beam)
+    %% holding the production default. The health tests exercise
+    %% hecate_om:health/0, not the HTTP socket, so the port is irrelevant.
+    application:load(hecate_om),
+    application:set_env(hecate_om, health_port, 0),
     {ok, _} = application:ensure_all_started(hecate_om),
     Config.
 
