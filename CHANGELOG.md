@@ -5,6 +5,23 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-07-26
+
+### Changed
+
+- **Requires macula `~> 7.0`** (was `~> 6.0`). macula 7.0.0 teaches the
+  canonical encoder floats (IEEE 754 binary64, RFC 8949 major type 7), so
+  services publish raw float telemetry again and stop scaling to integers to
+  get a number past our own codec.
+
+  This is a WIRE change upstream: a peer on macula 6.x finds no clause for
+  major 7 and rejects a frame carrying a float. Both ends of any topic that
+  will carry floats must be on 7.x, so roll stations and services together
+  rather than piecemeal.
+
+  0.7.0 was the stopgap that made the old restriction loud instead of silent.
+  This is the release that removes the restriction. See macula CHANGELOG 7.0.0.
+
 ## [0.7.0] - 2026-07-26
 
 ### Changed
