@@ -8,7 +8,7 @@
 #
 # Example:
 #   scripts/scaffold-service.sh \
-#     ~/work/codeberg.org/hecate-services/hecate-dns \
+#     ~/work/github.com/hecate-services/hecate-dns \
 #     hecate-dns \
 #     "DNS-over-Mesh name resolution for the Hecate realm"
 #
