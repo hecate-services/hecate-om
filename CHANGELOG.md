@@ -5,6 +5,26 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-07-26
+
+### Changed
+
+- **Requires macula `~> 6.0`** (was `~> 5.1`). BREAKING for consumers, because
+  macula 6.0.0 changed publish behaviour and that passes straight through:
+  `macula:publish/4,5` now returns `{error, {unsupported_payload_type, Type,
+  Path}}` where it previously returned `ok`, for raw floats, tuples, colliding
+  map keys, out-of-range integers and oversized payloads.
+
+  Those publishes were not working before. A float was silently rewritten as a
+  six-decimal text string, and an unrepresentable term killed the shared
+  peering connection while its sender was told `ok`. Services publishing raw
+  floats must scale to integers (micro-units) or send binary strings.
+
+  No wire-format change, so a service on 0.7.0 interoperates with stations and
+  peers on older macula; the guard is entirely sender-side.
+
+  See macula CHANGELOG 6.0.0.
+
 ## [0.6.0] - 2026-07-14
 
 ### Fixed
