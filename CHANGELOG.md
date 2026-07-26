@@ -25,10 +25,6 @@ Versioning: [SemVer](https://semver.org/).
 
   See macula CHANGELOG 6.0.0.
 
-- `cowboy` constraint loosened from `~> 2.12.0` to `~> 2.13`. The tight
-  three-component pin capped `cowlib` below 2.14, which made hecate_om
-  unresolvable alongside any dependency pulling a modern `gun` (2.4 needs
-  cowlib >= 2.15). hecate-victron could not build for exactly this reason.
 
 ## [0.6.0] - 2026-07-14
 
