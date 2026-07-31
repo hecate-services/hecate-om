@@ -1,0 +1,40 @@
+{{=<% %>=}}# <%repo%> — the service's own run contract.
+#
+# THIS IS NOT THE DEPLOYED FILE, AND THAT IS DELIBERATE. The fleet's GitOps state
+# lives in macula-demo, where a per-node reconciler pulls it; nothing on a beam
+# node reads this file. What lives here is what the SERVICE knows about itself:
+# its image, its port, the environment variables its own code reads, and its
+# health check. What lives in macula-demo is PLACEMENT: which node, which station
+# seed, which realm, which secret file, which compose project name.
+#
+# The split matters because the alternative is a config table in a README and a
+# compose file in another repository, drifting apart with nothing checking them.
+# Change an env var here and in macula-demo in the same breath.
+#
+# Runnable as-is against a local station, for a laptop or a stranger:
+#
+#   HECATE_REALM=<64-hex> MACULA_STATION_SEEDS=https://... \
+#     docker compose -p <%repo%> -f deploy/docker-compose.yml up -d
+
+services:
+  <%repo%>:
+    image: ghcr.io/hecate-services/<%repo%>:latest
+    container_name: <%repo%>
+    restart: unless-stopped
+    network_mode: host
+    labels:
+      # Zero-touch deploys: watchtower pulls a new :latest and recreates.
+      - "com.centurylinklabs.watchtower.enable=true"
+    environment:
+      # No default. A service that guesses its realm announces itself where
+      # nobody can attribute it, and that looks exactly like a healthy node.
+      - HECATE_REALM=${HECATE_REALM:?set HECATE_REALM to the 64-hex realm tag}
+      # No default either: naming a realm costs nothing, dialling a production
+      # station from every dev clone does.
+      - MACULA_STATION_SEEDS=${MACULA_STATION_SEEDS:?set MACULA_STATION_SEEDS to a station URL}
+      - HECATE_NODE_NAME=<%name%>
+      - HECATE_NODE_HOST=127.0.0.1
+      - HECATE_COOKIE=<%name%>
+      # CHECK THE FLEET BEFORE CHANGING. Host networking turns a port collision
+      # into a silent bind failure rather than a loud one.
+      - HECATE_HEALTH_PORT=<%health_port%>

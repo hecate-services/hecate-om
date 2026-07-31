@@ -1,0 +1,261 @@
+%%% @doc The scaffold template, generated for real and then inspected.
+%%%
+%%% THIS SUITE EXISTS BECAUSE THE PREVIOUS TEMPLATES ROTTED IN SILENCE. They sat
+%%% in this repository for months emitting a Quadlet unit nothing on the fleet
+%%% uses, TODO comments in place of two callbacks, a store-backed default for a
+%%% mostly producer-only estate, and an identity_spec claiming authority over
+%%% resources the generated service could not touch. Nothing exercised them, so
+%%% nothing said so. A template with no test is documentation that compiles.
+%%%
+%%% It runs `rebar3 new' as a real subprocess rather than rendering the templates
+%%% itself, because the things most likely to break are exactly the parts a
+%%% hand-rolled renderer would not reproduce: the manifest's destination paths,
+%%% the chmod entry, and mustache's own behaviour.
+%%%
+%%% THE DELIMITER CHANGE IS THE POINT OF generated_workflow_keeps_actions_syntax.
+%%% GitHub Actions writes ${{ secrets.GITHUB_TOKEN }} and mustache reads {{...}},
+%%% so a template without the delimiter change silently renders that to "$" and
+%%% reports success. The workflow then fails at its login step with an empty
+%%% password, a long way from the cause.
+-module(hecate_service_template_SUITE).
+
+-include_lib("common_test/include/ct.hrl").
+-include_lib("stdlib/include/assert.hrl").
+-include_lib("kernel/include/file.hrl").
+
+-export([all/0, init_per_suite/1, end_per_suite/1]).
+-export([generates_every_expected_file/1,
+         health_script_is_executable/1,
+         no_unrendered_variable_survives/1,
+         generated_workflow_keeps_actions_syntax/1,
+         generated_sources_satisfy_the_behaviour/1,
+         generated_service_reports_the_scaffolded_names/1]).
+
+-define(REPO, "hecate-probe-svc").
+-define(APP,  "hecate_probe_svc").
+-define(DESC, "A generated probe service").
+-define(PORT, "8499").
+
+all() ->
+    [generates_every_expected_file,
+     health_script_is_executable,
+     no_unrendered_variable_survives,
+     generated_workflow_keeps_actions_syntax,
+     generated_sources_satisfy_the_behaviour,
+     generated_service_reports_the_scaffolded_names].
+
+%%%---------------------------------------------------------------------------
+%%% Generate once, compile once, then assert
+%%%---------------------------------------------------------------------------
+
+%% Generation and compilation both happen here rather than as test cases,
+%% because everything below is meaningless if either fails, and a suite-level
+%% failure says so in one place instead of six.
+init_per_suite(Config) ->
+    Rebar3 = os:find_executable("rebar3"),
+    false =:= Rebar3 andalso ct:fail(rebar3_not_on_path),
+    Priv = ?config(priv_dir, Config),
+    Work = filename:join(Priv, "work"),
+    Ebin = filename:join(Priv, "ebin"),
+    ok = filelib:ensure_path(Work),
+    ok = filelib:ensure_path(Ebin),
+    Added = install_templates(templates_dir()),
+    Out = run(Rebar3, ["new", "hecate_service",
+                       "repo=" ?REPO, "name=" ?APP,
+                       "desc=" ?DESC, "health_port=" ?PORT],
+              Work),
+    ct:pal("rebar3 new said:~n~s", [Out]),
+    Root = filename:join(Work, ?REPO),
+    filelib:is_dir(Root) orelse ct:fail({no_output_dir, Root, Out}),
+    Compiled = compile_generated(Root, Ebin),
+    [{root, Root}, {ebin, Ebin}, {compiled, Compiled}, {added, Added} | Config].
+
+end_per_suite(Config) ->
+    _ = code:del_path(?config(ebin, Config)),
+    %% Only what this suite put there. A developer who had already run
+    %% scripts/install-templates.sh keeps their installation.
+    lists:foreach(fun(P) -> _ = file:delete(P) end, ?config(added, Config)),
+    ok.
+
+%%% SANDBOXING HOME LOOKED RIGHT AND WAS WRONG, TWICE, so the reason for doing it
+%%% this way is recorded rather than rediscovered. rebar3 resolves its global
+%%% config from `init:get_argument(home)', so a private HOME is what would
+%%% redirect template lookup. But on a machine where rebar3 is an asdf shim, that
+%%% same override breaks asdf: it looks for its installs under $HOME/.asdf and
+%%% exits 126, and then for its version selection in $HOME/.tool-versions and
+%%% exits with "No version is set". Chasing that means teaching a test about a
+%%% version manager.
+%%%
+%%% So the suite installs into the real rebar3 template directory and removes
+%%% exactly what it added. It works the same on a laptop and in a bare CI
+%%% container, and it exercises the installation path the humans use.
+templates_dir() ->
+    {ok, [[Home]]} = init:get_argument(home),
+    filename:join([Home, ".config", "rebar3", "templates"]).
+
+%% Returns the paths created, so end_per_suite removes those and nothing else.
+%% Symlinks, so an edit to a template in this checkout is what the next run sees.
+install_templates(Dest) ->
+    Src = filename:join(code:priv_dir(hecate_om), "templates"),
+    ok = filelib:ensure_path(Dest),
+    {ok, Entries} = file:list_dir(Src),
+    lists:filtermap(fun(E) -> link_entry(filename:join(Src, E),
+                                         filename:join(Dest, E))
+                    end, Entries).
+
+link_entry(Src, Dest) ->
+    link_entry(file:read_link_info(Dest), Src, Dest).
+
+%% Already there: leave it alone and do not claim it for cleanup.
+link_entry({ok, _Info}, _Src, _Dest) ->
+    false;
+link_entry({error, enoent}, Src, Dest) ->
+    ok = file:make_symlink(Src, Dest),
+    {true, Dest}.
+
+%% The outer run's rebar environment is cleared so the nested invocation cannot
+%% inherit this suite's own build state, profile or config. HOME is deliberately
+%% left alone; see templates_dir/0 for why.
+run(Exe, Args, Cwd) ->
+    Port = erlang:open_port(
+             {spawn_executable, Exe},
+             [{args, Args}, {cd, Cwd}, exit_status, stderr_to_stdout, binary,
+              {env, [{"REBAR_BASE_DIR", false},
+                     {"REBAR_CONFIG", false},
+                     {"REBAR_PROFILE", false}]}]),
+    collect(Port, <<>>).
+
+collect(Port, Acc) ->
+    receive
+        {Port, {data, Bin}}      -> collect(Port, <<Acc/binary, Bin/binary>>);
+        {Port, {exit_status, 0}} -> Acc;
+        {Port, {exit_status, N}} -> ct:fail({rebar3_new_failed, N, Acc})
+    after 120000 ->
+        ct:fail({rebar3_new_timeout, Acc})
+    end.
+
+%% hecate_om is compiled right here, so the generated modules can be compiled
+%% against it and the `-behaviour(hecate_om_service)' attribute makes the
+%% compiler check all six callbacks. warnings_as_errors matches what the
+%% generated rebar.config sets, so a template emitting an unused variable fails
+%% here too, exactly as it would for whoever scaffolds next.
+compile_generated(Root, Ebin) ->
+    Srcs = [filename:join([Root, "apps", ?APP, "src", ?APP ++ Suffix])
+            || Suffix <- ["_app.erl", "_sup.erl", "_service.erl"]],
+    Results = [{S, compile:file(S, [{outdir, Ebin}, return, warnings_as_errors,
+                                    debug_info])}
+               || S <- Srcs],
+    Bad = [R || R = {_S, Res} <- Results, element(1, Res) =/= ok],
+    [] =:= Bad orelse ct:fail({generated_sources_do_not_compile, Bad}),
+    true = code:add_patha(Ebin),
+    Results.
+
+%%%---------------------------------------------------------------------------
+%%% What was generated
+%%%---------------------------------------------------------------------------
+
+%% Spelled out rather than globbed, so DELETING an entry from the manifest breaks
+%% this test. A generated repository missing its CI or its compose file still
+%% compiles and still passes every other assertion here.
+generates_every_expected_file(Config) ->
+    Root = ?config(root, Config),
+    Expected =
+        ["rebar.config", ".gitignore", "README.md", "CHANGELOG.md", "LICENSE",
+         "Containerfile",
+         ".github/workflows/build-push.yml",
+         ".github/workflows/lint.yml",
+         "config/sys.config.src", "config/vm.args.src",
+         "deploy/docker-compose.yml",
+         "scripts/health.sh",
+         "apps/" ?APP "/src/" ?APP ".app.src",
+         "apps/" ?APP "/src/" ?APP "_app.erl",
+         "apps/" ?APP "/src/" ?APP "_sup.erl",
+         "apps/" ?APP "/src/" ?APP "_service.erl",
+         "apps/" ?APP "/test/" ?APP "_service_tests.erl"],
+    Missing = [P || P <- Expected,
+                    not filelib:is_regular(filename:join(Root, P))],
+    ?assertEqual([], Missing).
+
+%% Forgetting the chmod entry produces a script that looks right and cannot run,
+%% and it is a recorded recurring mistake in this estate.
+health_script_is_executable(Config) ->
+    Path = filename:join(?config(root, Config), "scripts/health.sh"),
+    {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
+    ?assertEqual(8#100, Mode band 8#100).
+
+%% A variable named in a file but not declared in the manifest renders as empty
+%% and reports success, so the only way to see it is to look for what is left
+%% behind. Both delimiter styles are searched: mustache's default, and the
+%% alternate the templates switch to on their first line.
+no_unrendered_variable_survives(Config) ->
+    Root = ?config(root, Config),
+    Offenders = [{F, Left} || F <- all_files(Root),
+                              Left <- [unrendered(read(F))],
+                              Left =/= []],
+    ?assertEqual([], Offenders).
+
+%% ${{ ... }} IS NOT AN UNRENDERED TAG. GitHub Actions expressions are supposed
+%% to reach the workflow file intact, and this test's first version flagged them,
+%% which would have made the honest case indistinguishable from the broken one.
+%% A leftover mustache tag is a `{{' that no dollar precedes.
+unrendered(Bin) ->
+    [P || {P, _} <- binary:matches(Bin, <<"{{">>), not dollar_before(Bin, P)]
+        ++ [P || {P, _} <- binary:matches(Bin, <<"<%">>)].
+
+dollar_before(_Bin, 0) -> false;
+dollar_before(Bin, P)  -> binary:at(Bin, P - 1) =:= $$.
+
+generated_workflow_keeps_actions_syntax(Config) ->
+    Body = read(filename:join(?config(root, Config),
+                              ".github/workflows/build-push.yml")),
+    ?assertNotEqual(nomatch,
+                    binary:match(Body, <<"${{ secrets.GITHUB_TOKEN }}">>)),
+    ?assertNotEqual(nomatch,
+                    binary:match(Body, <<"${{ steps.tag.outputs.tag }}">>)).
+
+%%%---------------------------------------------------------------------------
+%%% Does the generated service hold up
+%%%---------------------------------------------------------------------------
+
+%% init_per_suite already failed the run if they did not compile. What is left to
+%% assert is that the behaviour attribute is actually present, since that is the
+%% guard turning a forgotten callback into a compile error for the next service.
+generated_sources_satisfy_the_behaviour(Config) ->
+    Results = ?config(compiled, Config),
+    ?assertEqual(3, length(Results)),
+    Mod = list_to_atom(?APP "_service"),
+    {module, Mod} = code:ensure_loaded(Mod),
+    %% One `-behaviour' attribute, whose value is itself a list of one.
+    Attrs = Mod:module_info(attributes),
+    ?assertEqual([[hecate_om_service]],
+                 proplists:get_all_values(behaviour, Attrs)).
+
+%% The two names must agree and the version must be the application's own. The
+%% GENERATED suite asserts these too; asserting them here means a template that
+%% breaks the pair is caught in this repository rather than in whatever service
+%% gets scaffolded next.
+generated_service_reports_the_scaffolded_names(_Config) ->
+    Mod = list_to_atom(?APP "_service"),
+    #{name := Name, description := Desc, version := Vsn} = Mod:info(),
+    ?assertEqual(list_to_binary(?REPO), Name),
+    ?assertEqual(list_to_binary(?DESC), Desc),
+    ?assertEqual(<<"0.1.0">>, Vsn),
+    #{scope := Scope, actions := Actions, resources := Resources} =
+        Mod:identity_spec(),
+    ?assertEqual(list_to_binary(?REPO), Scope),
+    %% Empty on purpose: a service that does nothing must not claim authority,
+    %% and the previous template claimed two actions and a wildcard resource.
+    ?assertEqual([], Actions),
+    ?assertEqual([], Resources),
+    ?assertEqual([], Mod:capabilities()).
+
+%%%---------------------------------------------------------------------------
+%%% Helpers
+%%%---------------------------------------------------------------------------
+
+all_files(Root) ->
+    filelib:fold_files(Root, ".*", true, fun(F, Acc) -> [F | Acc] end, []).
+
+read(Path) ->
+    {ok, Bin} = file:read_file(Path),
+    Bin.

@@ -1,0 +1,21 @@
+{{=<% %>=}}# Structural lint and unit tests. Runs on the glibc erlang image, where macula
+# resolves a prebuilt QUIC NIF and no Rust toolchain is needed. The alpine image
+# build forces a source build instead; see the Containerfile for why.
+
+name: lint-and-test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:27
+    steps:
+      - uses: actions/checkout@v4
+      - run: rebar3 lint
+      - run: rebar3 eunit

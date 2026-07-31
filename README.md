@@ -157,21 +157,63 @@ secondary indexes. Omit it (or return `[]`) for a store with none.
 ## Scaffold a new service
 
 ```bash
-# Inside a fresh hecate-services/hecate-NEWSERVICE checkout:
-hecate-om scaffold --name hecate-newservice --description "Does X over the mesh"
+# From the directory that will hold the new repository,
+# typically ~/work/github.com/hecate-services:
+scripts/scaffold-service.sh hecate-newservice "Does X over the mesh" 8484
 ```
 
-Generates:
-- `src/hecate_newservice.app.src` and `*_app.erl`, `*_sup.erl`
-- A skeleton `*_service.erl` implementing the behaviour
-- `Containerfile` (multi-stage Erlang build)
-- `quadlet/hecate-newservice.container`
-- `manifest.json` (service_type: container_daemon)
-- `.github/workflows/build-push.yml` (build + push to ghcr.io)
-- `rebar.config` (with hecate_om as dep)
+That is a thin wrapper over `rebar3 new hecate_service`, and it exists so you
+**say the name once**. A service has two names: the repository, the container
+image and the name it answers to on the mesh are kebab-case, while the OTP
+application and every module prefix are snake_case because they are Erlang
+atoms. Mustache has no functions, so a template cannot derive one from the
+other. The generated eunit suite asserts the two agree modulo the separator, so
+a hand-rolled `rebar3 new` with a mismatched pair still fails on its first test
+run.
 
-(The `hecate-om scaffold` CLI is a follow-up. Today, copy
-`templates/` and find-replace `newservice` manually.)
+To use `rebar3 new` directly, install the templates once. rebar3 only finds
+custom templates under `~/.config/rebar3/templates`, and an empty directory has
+no dependencies to carry them there:
+
+```bash
+scripts/install-templates.sh          # symlinks; --remove to undo
+rebar3 new hecate_service repo=hecate-newservice name=hecate_newservice \
+    desc="Does X over the mesh" health_port=8484
+```
+
+Generates a repository that compiles, tests and deploys:
+
+- `apps/<app>/src/` — the `.app.src`, `_app.erl`, `_sup.erl` and a
+  `_service.erl` implementing the behaviour
+- `apps/<app>/test/` — a suite asserting the contract's shape, the two names,
+  and that the reported version is the application's own
+- `rebar.config` with a relx release, the prod profile and the elvis ruleset
+- `config/sys.config.src` and `config/vm.args.src`
+- `Containerfile` (multi-stage, macula's QUIC NIF built from source)
+- `deploy/docker-compose.yml` — the service's own run contract, **not** the
+  deployed file; fleet placement lives in `macula-demo`
+- `.github/workflows/` — `lint-and-test` and `build-push` to ghcr.io
+- `scripts/health.sh`, executable
+- `README.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore`
+
+**It emits no TODO and no stub.** What it generates is honestly complete and
+empty: the supervisor has no children, and the service announces no capability
+and requests no authority. Those are the correct answers for a service that does
+nothing yet, and each is asserted by a generated test, so filling one in is a
+deliberate act that breaks a test rather than a comment someone forgets.
+
+The templates are exercised by `hecate_service_template_SUITE`, which generates
+a service for real and compiles it. The suite exists because the previous
+templates drifted unnoticed for months, and a template with no test is
+documentation that compiles.
+
+Three things it cannot do for you, all of which have bitten:
+
+1. The ghcr package may be created **private**, which fails the pull on a node
+   with a bare `unauthorized` that names nothing.
+2. The fleet entry in `macula-demo` has to be added by hand.
+3. The node's secret must be seeded at `~/.hecate/secrets/`, 0600. A manifest
+   entry without it is a silent no-op that looks like a successful deploy.
 
 ## Status
 

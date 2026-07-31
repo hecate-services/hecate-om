@@ -1,0 +1,31 @@
+# Structural lint and the Common Test suites.
+#
+# THE TEMPLATE SUITE IS THE REASON THIS EXISTS. hecate_om ships the scaffold
+# every other service is generated from, and the previous templates drifted for
+# months precisely because nothing ran them: they emitted a Quadlet unit nothing
+# on the fleet uses, TODOs in place of callbacks, and an identity_spec claiming
+# authority the generated service could not exercise. A guard nobody runs is not
+# a guard.
+#
+# Runs on the glibc erlang image, where macula resolves a prebuilt QUIC NIF and
+# no Rust toolchain is needed.
+
+name: lint-and-test
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:27
+    steps:
+      - uses: actions/checkout@v4
+      - run: rebar3 lint
+      # hecate_service_template_SUITE shells out to `rebar3 new', so rebar3 must
+      # be on PATH inside the container. The erlang image ships it.
+      - run: rebar3 ct

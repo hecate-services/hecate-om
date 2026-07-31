@@ -1,9 +1,13 @@
-# Build the OCI image for {{service_name}} and push to ghcr.io.
-# Triggered on push to main and on tag pushes.
+{{=<% %>=}}# Build the OCI image for <%repo%> and push to ghcr.io.
 #
-# Drop this into .github/workflows/build-push.yml (the GitHub mirror
-# runs this; Codeberg has Forgejo Actions disabled per the migration
-# pattern).
+# Pushes BOTH :latest and the semver tag. The deployed compose tracks :latest
+# under watchtower for zero-touch deploys, and the semver tags stay on ghcr so a
+# bad release can be pinned back to a known one.
+#
+# NOTE ON PUSHING THIS FILE. An HTTPS push that creates or updates anything under
+# .github/workflows/ needs a token carrying the `workflow' scope, and the error
+# names the FILE rather than the missing scope. Use an SSH remote and the problem
+# does not arise.
 
 name: build-and-push
 
@@ -11,6 +15,7 @@ on:
   push:
     branches: [main]
     tags:     ['v*']
+  workflow_dispatch:
 
 jobs:
   build-and-push:
@@ -45,5 +50,5 @@ jobs:
           file: Containerfile
           push: true
           tags: |
-            ghcr.io/hecate-services/{{service_name}}:latest
-            ghcr.io/hecate-services/{{service_name}}:${{ steps.tag.outputs.tag }}
+            ghcr.io/hecate-services/<%repo%>:latest
+            ghcr.io/hecate-services/<%repo%>:${{ steps.tag.outputs.tag }}

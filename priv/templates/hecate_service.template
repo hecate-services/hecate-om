@@ -1,0 +1,71 @@
+%% -*- mode: erlang -*-
+%% Scaffold a complete hecate service: OTP release, container image, CI, and a
+%% deployable compose file.
+%%
+%% THIS EXISTS SO A NEW SERVICE STARTS DEPLOYABLE RATHER THAN STARTING EMPTY.
+%% The dull half of a service (release packaging, image, CI, health wiring, the
+%% six-callback contract) is the half that is tedious to retrofit and easy to get
+%% subtly wrong. Generating it means the first commit of a new service already
+%% builds, already passes its own tests, and already has somewhere to run.
+%%
+%% IT GENERATES NO TODO AND NO STUB. What it emits is honestly complete and
+%% empty: the supervisor has no children, the service announces no capability and
+%% requests no authority. Those are correct answers for a service that does
+%% nothing yet, and each one is asserted by a generated test, so filling them in
+%% is a deliberate act that breaks a test rather than a comment someone forgets.
+%%
+%% TWO NAMES, DELIBERATELY, because they differ and the difference is load
+%% bearing. `name' is the OTP application and every module prefix, so it must be
+%% a valid Erlang atom in snake_case. `repo' is the git repository, the container
+%% image and the name this service answers to on the mesh, and the house
+%% convention there is kebab-case. A generated test asserts the two agree modulo
+%% the separator, so a mismatched pair fails the first time eunit runs rather
+%% than shipping a service whose image and application disagree.
+%%
+%% Usage, from the directory that will hold the new repository:
+%%
+%%   rebar3 new hecate_service repo=hecate-foo name=hecate_foo \
+%%       desc="Does X over the mesh" health_port=8484
+
+{description, "A complete hecate service: release, container, CI, compose, and the six-callback hecate_om_service contract"}.
+
+{variables, [
+    {repo, "hecate-newservice",
+     "Repository, container image and mesh-facing name. KEBAB-case."},
+    {name, "hecate_newservice",
+     "OTP application and module prefix. SNAKE_case, must be a valid Erlang atom, and must match `repo' modulo the separator."},
+    {desc, "Does something over the mesh",
+     "One line describing what the service does. Ends up in info/0, the app.src and the README."},
+    {health_port, "8484",
+     "Port for the /health endpoint. TAKEN ON THE FLEET AS OF 2026-07-31: 8450, 8471, 8481, 8482, 8483. Host networking makes a collision a silent bind failure, so check before choosing."}
+]}.
+
+%% Build
+{template, "hecate_service/rebar.config",       "{{repo}}/rebar.config"}.
+{template, "hecate_service/gitignore",          "{{repo}}/.gitignore"}.
+
+%% The application
+{template, "hecate_service/app.src",            "{{repo}}/apps/{{name}}/src/{{name}}.app.src"}.
+{template, "hecate_service/app.erl",            "{{repo}}/apps/{{name}}/src/{{name}}_app.erl"}.
+{template, "hecate_service/sup.erl",            "{{repo}}/apps/{{name}}/src/{{name}}_sup.erl"}.
+{template, "hecate_service/service.erl",        "{{repo}}/apps/{{name}}/src/{{name}}_service.erl"}.
+{template, "hecate_service/service_tests.erl",  "{{repo}}/apps/{{name}}/test/{{name}}_service_tests.erl"}.
+
+%% Release configuration
+{template, "hecate_service/sys.config.src",     "{{repo}}/config/sys.config.src"}.
+{template, "hecate_service/vm.args.src",        "{{repo}}/config/vm.args.src"}.
+
+%% Image, CI and deployment
+{template, "hecate_service/Containerfile",      "{{repo}}/Containerfile"}.
+{template, "hecate_service/build-push.yml",     "{{repo}}/.github/workflows/build-push.yml"}.
+{template, "hecate_service/lint.yml",           "{{repo}}/.github/workflows/lint.yml"}.
+{template, "hecate_service/compose.yml",        "{{repo}}/deploy/docker-compose.yml"}.
+
+%% Scripts
+{template, "hecate_service/health.sh",          "{{repo}}/scripts/health.sh"}.
+{chmod,                                         "{{repo}}/scripts/health.sh", 8#755}.
+
+%% Documentation
+{template, "hecate_service/README.md",          "{{repo}}/README.md"}.
+{template, "hecate_service/CHANGELOG.md",       "{{repo}}/CHANGELOG.md"}.
+{template, "hecate_service/LICENSE",            "{{repo}}/LICENSE"}.

@@ -5,6 +5,43 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **`rebar3 new hecate_service`**, a real rebar3 template in `priv/templates`,
+  generating a repository that compiles, tests and deploys: the OTP application
+  and supervisor, the six-callback service module, a eunit suite asserting the
+  contract, a relx release, a `Containerfile`, both CI workflows, an executable
+  `scripts/health.sh`, `deploy/docker-compose.yml`, and the usual documentation.
+- `scripts/install-templates.sh`, because rebar3 only finds custom templates
+  under `~/.config/rebar3/templates` and an empty directory has no dependency to
+  carry them there.
+- `hecate_service_template_SUITE`, which generates a service for real through
+  `rebar3 new` and then compiles it against this library, so the
+  `-behaviour(hecate_om_service)` attribute checks all six callbacks. It also
+  asserts the file set, that `health.sh` is executable, that no unrendered
+  variable survives, and that GitHub Actions expressions are intact.
+- `.github/workflows/lint-and-test.yml`. This repository had no CI at all, which
+  is how the old templates drifted unnoticed.
+
+### Changed
+
+- **`scripts/scaffold-service.sh` is now a wrapper over the template** and takes
+  the service name once, deriving the snake_case application name from the
+  kebab-case repository name. It previously rendered a handful of files with sed
+  and left you to write `rebar.config`, the `.app.src` and the supervisor by
+  hand, so a scaffolded service did not compile.
+
+### Removed
+
+- **The old `templates/` directory.** It had drifted from the estate it was
+  meant to serve: a Quadlet unit that nothing on the fleet uses (the beam nodes
+  run docker compose under a pull-based reconciler), `TODO` comments in place of
+  two callbacks, a store-backed service as the default in a mostly producer-only
+  estate, an `identity_spec` claiming two actions and a wildcard resource for a
+  service that could exercise none of them, and no test file at all. Nothing
+  consumed it: the `hecate-om scaffold` CLI its own README documented was never
+  written.
+
 ## [0.8.0] - 2026-07-26
 
 ### Changed
