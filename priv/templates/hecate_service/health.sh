@@ -2,10 +2,10 @@
 # Ask a running <%repo%> how it is.
 #
 # Defaults to the local node on the port the image exposes. Pass a host to reach
-# one on the fleet, for example:
+# one on another host, for example:
 #
-#   scripts/health.sh beam01.lab
-#   HECATE_HEALTH_PORT=<%health_port%> scripts/health.sh beam01.lab
+#   scripts/health.sh a-remote-host
+#   HECATE_HEALTH_PORT=<%health_port%> scripts/health.sh a-remote-host
 #
 # THREE OUTCOMES, NOT TWO, because they need different responses from whoever is
 # reading. Unreachable means the container is not running or the port is wrong.

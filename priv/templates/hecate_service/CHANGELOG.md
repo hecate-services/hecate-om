@@ -19,5 +19,5 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   source rather than fetched against a foreign libc.
 - `deploy/docker-compose.yml`, the service's own run contract.
 - CI: `lint-and-test` on every push and pull request, `build-and-push` to
-  ghcr.io on `main` and on `v*` tags, publishing both `:latest` and the semver
+  the registry on `main` and on `v*` tags, publishing both `:latest` and the semver
   tag.

@@ -178,8 +178,16 @@ no dependencies to carry them there:
 ```bash
 scripts/install-templates.sh          # symlinks; --remove to undo
 rebar3 new hecate_service repo=hecate-newservice name=hecate_newservice \
-    desc="Does X over the mesh" health_port=8484
+    desc="Does X over the mesh" org=your-org registry=ghcr.io health_port=8484
 ```
+
+**The scaffold is not house-specific.** `org` and `registry` are variables, and
+nothing generated names our organisation, our registry, our deployment
+repository or our hosts. If you are building a hecate service for your own mesh,
+set those two and everything else follows. `scaffold-service.sh` defaults them
+to ours because that is who runs it most; `HECATE_ORG` and `HECATE_REGISTRY`
+override. A test generates a service as a stranger and fails if any of our own
+specifics survive.
 
 Generates a repository that compiles, tests and deploys:
 
@@ -207,13 +215,24 @@ a service for real and compiles it. The suite exists because the previous
 templates drifted unnoticed for months, and a template with no test is
 documentation that compiles.
 
-Three things it cannot do for you, all of which have bitten:
+One thing it cannot do for you, and it has bitten: the registry package may be
+created **private**, and the pull then fails on the host with a bare
+`unauthorized` that names nothing. Check it after the first build.
 
-1. The ghcr package may be created **private**, which fails the pull on a node
-   with a bare `unauthorized` that names nothing.
-2. The fleet entry in `macula-demo` has to be added by hand.
-3. The node's secret must be seeded at `~/.hecate/secrets/`, 0600. A manifest
-   entry without it is a silent no-op that looks like a successful deploy.
+### Deploying on the BEAM Campus fleet
+
+Ours, and deliberately not part of the scaffold. `deploy/docker-compose.yml` in
+a generated service carries what the service knows about itself; the fleet's
+GitOps state lives in `macula-demo` and carries **placement**.
+
+1. Add a compose file under `macula-demo/infrastructure/scripts/` with the node,
+   the station seed, the realm, the secret file and the compose project name.
+2. Add a line to that node's `reconcile.manifest`.
+3. Seed the node's secret at `~/.hecate/secrets/`, 0600. A manifest entry
+   without it is a silent no-op that looks exactly like a successful deploy.
+
+Health ports already bound across the fleet: 8450, 8471, 8481, 8482, 8483. Host
+networking makes a collision a silent bind failure.
 
 ## Status
 

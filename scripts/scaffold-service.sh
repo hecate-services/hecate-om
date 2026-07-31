@@ -29,6 +29,12 @@ REPO_NAME="${1:?usage: scaffold-service.sh <repo-name> \"<description>\" [health
 DESCRIPTION="${2:?one-line description required}"
 HEALTH_PORT="${3:-8484}"
 
+# WHO IS BUILDING THIS. Defaulted to the BEAM Campus fleet because that is who
+# runs this script most, and overridable because the scaffold is meant to be
+# usable by someone who is not us. The template itself hardcodes neither.
+ORG="${HECATE_ORG:-hecate-services}"
+REGISTRY="${HECATE_REGISTRY:-ghcr.io}"
+
 # hecate-foo -> hecate_foo. The generated eunit suite asserts the two agree
 # modulo the separator, so a hand-rolled `rebar3 new' with a mismatched pair
 # still fails on the first test run rather than shipping.
@@ -60,12 +66,14 @@ if [ ! -e "${HOME}/.config/rebar3/templates/hecate_service.template" ]; then
     "${HERE}/install-templates.sh" >/dev/null
 fi
 
-echo "[scaffold] ${REPO_NAME} (app ${APP_NAME}, health port ${HEALTH_PORT})"
+echo "[scaffold] ${REPO_NAME} (app ${APP_NAME}, ${REGISTRY}/${ORG}, health port ${HEALTH_PORT})"
 
 rebar3 new hecate_service \
     repo="${REPO_NAME}" \
     name="${APP_NAME}" \
     desc="${DESCRIPTION}" \
+    org="${ORG}" \
+    registry="${REGISTRY}" \
     health_port="${HEALTH_PORT}"
 
 cat <<EOF
@@ -75,18 +83,26 @@ Next, and none of these can be generated:
   cd ${REPO_NAME}
   rebar3 eunit && rebar3 lint
   git init -b main && git add . && git commit
-  gh repo create hecate-services/${REPO_NAME} --public --source=. --remote=github
-  git remote set-url github git@github.com:hecate-services/${REPO_NAME}.git
+  gh repo create ${ORG}/${REPO_NAME} --public --source=. --remote=github
+  git remote set-url github git@github.com:${ORG}/${REPO_NAME}.git
 
 The remote must be SSH. An HTTPS push that creates .github/workflows/ needs a
 token with the 'workflow' scope, and the error names the file, not the scope.
 
-Then, once CI has pushed the first image:
+Once CI has pushed the first image, check the package is PUBLIC. It may be
+created private, and the pull then fails on the host with a bare "unauthorized"
+that names nothing.
+EOF
 
-  1. Check the ghcr package is PUBLIC. It may be created private, and the node
-     fails the pull with a bare "unauthorized" that names nothing.
-  2. Add the fleet entry in macula-demo: a compose file under
-     infrastructure/scripts/ and a line in the node's reconcile.manifest.
+if [ "${ORG}" = "hecate-services" ]; then
+cat <<EOF
+
+Deploying on the BEAM Campus fleet, which is ours and not part of the scaffold:
+
+  1. Add a compose file under macula-demo/infrastructure/scripts/ carrying
+     PLACEMENT: node, station seed, realm, secret file, project name.
+  2. Add a line to that node's reconcile.manifest.
   3. Seed the node's secret at ~/.hecate/secrets/, 0600. A manifest entry
      without it is a silent no-op that looks like a successful deploy.
 EOF
+fi

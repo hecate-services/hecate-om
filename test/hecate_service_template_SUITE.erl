@@ -28,6 +28,7 @@
          health_script_is_executable/1,
          no_unrendered_variable_survives/1,
          generated_workflow_keeps_actions_syntax/1,
+         leaks_no_house_specifics/1,
          generated_sources_satisfy_the_behaviour/1,
          generated_service_reports_the_scaffolded_names/1]).
 
@@ -35,12 +36,17 @@
 -define(APP,  "hecate_probe_svc").
 -define(DESC, "A generated probe service").
 -define(PORT, "8499").
+%% DELIBERATELY NOT OUR OWN ORG OR REGISTRY. Generating as a stranger is what
+%% makes leaked_house_specifics/1 able to prove the scaffold is usable by one.
+-define(ORG,      "acme-widgets").
+-define(REGISTRY, "registry.example.test").
 
 all() ->
     [generates_every_expected_file,
      health_script_is_executable,
      no_unrendered_variable_survives,
      generated_workflow_keeps_actions_syntax,
+     leaks_no_house_specifics,
      generated_sources_satisfy_the_behaviour,
      generated_service_reports_the_scaffolded_names].
 
@@ -62,7 +68,8 @@ init_per_suite(Config) ->
     Added = install_templates(templates_dir()),
     Out = run(Rebar3, ["new", "hecate_service",
                        "repo=" ?REPO, "name=" ?APP,
-                       "desc=" ?DESC, "health_port=" ?PORT],
+                       "desc=" ?DESC, "health_port=" ?PORT,
+                       "org=" ?ORG, "registry=" ?REGISTRY],
               Work),
     ct:pal("rebar3 new said:~n~s", [Out]),
     Root = filename:join(Work, ?REPO),
@@ -212,6 +219,31 @@ generated_workflow_keeps_actions_syntax(Config) ->
                     binary:match(Body, <<"${{ secrets.GITHUB_TOKEN }}">>)),
     ?assertNotEqual(nomatch,
                     binary:match(Body, <<"${{ steps.tag.outputs.tag }}">>)).
+
+%% THE SCAFFOLD MUST BE USABLE BY SOMEONE WHO IS NOT US, and the first version
+%% was not: it hardcoded our organisation, our registry, our GitOps repository
+%% and our fleet's port allocations, so a stranger generating a service got a
+%% repository that pushed to an account they cannot write to and told them to
+%% edit a repository they have never seen.
+%%
+%% This suite generates as `acme-widgets' against a made-up registry, so any
+%% house-specific string that survives is a value that is not really a variable.
+%% Asserting the ABSENCE is what makes the property hold under later edits;
+%% asserting the presence of <%org%> would not, because a comment mentioning us
+%% by name would still slip through.
+leaks_no_house_specifics(Config) ->
+    Root = ?config(root, Config),
+    Forbidden = [<<"hecate-services">>,   %% our organisation
+                 <<"ghcr.io/">>,          %% our registry, as a path prefix
+                 <<"macula-demo">>,       %% our GitOps repository
+                 <<"beam0">>,             %% our node names
+                 <<"reconcile.manifest">> %% our deployment mechanism
+                ],
+    Leaks = [{filename:basename(F), S}
+             || F <- all_files(Root),
+                S <- Forbidden,
+                binary:match(read(F), S) =/= nomatch],
+    ?assertEqual([], Leaks).
 
 %%%---------------------------------------------------------------------------
 %%% Does the generated service hold up

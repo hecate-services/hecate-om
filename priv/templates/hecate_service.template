@@ -36,8 +36,12 @@
      "OTP application and module prefix. SNAKE_case, must be a valid Erlang atom, and must match `repo' modulo the separator."},
     {desc, "Does something over the mesh",
      "One line describing what the service does. Ends up in info/0, the app.src and the README."},
+    {org, "hecate-services",
+     "Your source-forge organisation or user. Owns the repository URL and the container image namespace. CHANGE THIS if you are not building for the BEAM Campus fleet."},
+    {registry, "ghcr.io",
+     "Container registry the image is pushed to. ghcr.io pairs with a GitHub org; set it to whatever you publish to."},
     {health_port, "8484",
-     "Port for the /health endpoint. TAKEN ON THE FLEET AS OF 2026-07-31: 8450, 8471, 8481, 8482, 8483. Host networking makes a collision a silent bind failure, so check before choosing."}
+     "Port for the /health endpoint. The container uses host networking, because macula stations are AAAA-only and a default bridge cannot reach them, so a port already bound on the host fails SILENTLY. Pick one you know is free."}
 ]}.
 
 %% Build

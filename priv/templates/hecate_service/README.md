@@ -30,32 +30,31 @@ a different libc.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `HECATE_REALM` | required | 64-hex fleet realm tag. No default: a service that guesses its realm announces itself where nobody can attribute it. |
+| `HECATE_REALM` | required | 64-hex realm tag, the `sha256` of the realm's name. No default: a service that guesses its realm announces itself where nobody can attribute it. |
 | `MACULA_STATION_SEEDS` | required | Station to dial. No default: naming a realm costs nothing, dialling a production station from every dev clone does. |
-| `HECATE_HEALTH_PORT` | `<%health_port%>` | Health endpoint. Host networking makes a collision a silent bind failure, so check the fleet before changing. |
+| `HECATE_HEALTH_PORT` | `<%health_port%>` | Health endpoint. Host networking makes a collision a silent bind failure, so check the host before changing.  |
 | `HECATE_NODE_NAME` | `<%name%>` | Erlang node name. |
 | `HECATE_NODE_HOST` | `127.0.0.1` | Erlang node host. |
 | `HECATE_COOKIE` | `<%name%>` | Erlang cookie. |
 
-`deploy/docker-compose.yml` is the service's own run contract and is runnable
-as-is. It is **not** the deployed file: fleet placement lives in `macula-demo`,
-where a per-node reconciler pulls it. Change an env var in both in one breath.
+`deploy/docker-compose.yml` runs it, and carries what the service knows about
+itself. If you deploy through something else, let that carry **placement**: which
+host, which station, which realm, which secret store. Keeping the two apart is
+what stops a config table in a README and the real environment drifting.
 
 ## Deployment
 
 CI builds on every push to `main` and pushes
-`ghcr.io/hecate-services/<%repo%>:latest` plus the semver tag. A node pulls
-`:latest` under watchtower, so a merge is a deploy and a rollback is pinning the
-compose to a semver tag.
+`<%registry%>/<%org%>/<%repo%>:latest` plus the semver tag. Pull `:latest` under
+watchtower and a merge is a deploy, while a rollback is pinning to a semver tag.
 
-Three things CI cannot do for you, all of which have bitten before:
+Two things CI cannot do for you, both of which have bitten:
 
-1. The ghcr package may be created **private**, which fails the pull on the node
-   with a bare `unauthorized` that names nothing. Check it after the first build.
-2. The fleet entry in `macula-demo` (`infrastructure/scripts/` plus the node's
-   `reconcile.manifest`) has to be added by hand.
-3. The node needs its secret seeded at `~/.hecate/secrets/`, 0600. A manifest
-   entry without it is a silent no-op that looks like a successful deploy.
+1. The registry package may be created **private**, and the pull then fails on
+   the host with a bare `unauthorized` that names nothing. Check it after the
+   first build. On ghcr the `org.opencontainers.image.source` label in the
+   Containerfile is what links the package to the repository.
+2. The host needs `HECATE_REALM` supplied from somewhere it is not committed.
 
 ## The service contract
 

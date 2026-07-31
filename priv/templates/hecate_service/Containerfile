@@ -34,11 +34,12 @@ COPY apps ./apps
 RUN rebar3 as prod release
 
 FROM docker.io/alpine:3.22
-# LINKS THE PACKAGE TO THE REPO. Without it a ghcr package is an orphan: it does
-# not appear on the repo page and does not inherit the repo's visibility. A
-# sibling shipped private by accident and the deploy failed on the node with a
-# bare "unauthorized" from the pull, which names nothing.
-LABEL org.opencontainers.image.source="https://github.com/hecate-services/<%repo%>"
+# LINKS THE PACKAGE TO THE REPOSITORY. On registries that read it, ghcr among
+# them, a package without this label is an orphan: it does not appear on the
+# repository page and does not inherit its visibility. A service that shipped
+# private by accident failed its first pull with a bare "unauthorized", which
+# names nothing and sends you looking in the wrong place.
+LABEL org.opencontainers.image.source="https://github.com/<%org%>/<%repo%>"
 RUN apk add --no-cache ncurses-libs libstdc++ libgcc openssl ca-certificates curl
 WORKDIR /app
 COPY --from=builder /build/_build/prod/rel/<%name%> ./
