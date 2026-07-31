@@ -1,157 +1,121 @@
 # Container deployment
 
-Every `hecate-services/hecate-X` ships as an OCI container image to
-`ghcr.io/hecate-services/hecate-X` and runs on **realm infrastructure
-nodes** under system-wide systemd-managed Podman (Quadlet units),
-orchestrated by the existing `hecate-gitops` reconciler.
+A hecate service ships as an OCI image and runs on an infrastructure
+node. This guide describes how that actually works today, and says
+plainly where something is intended rather than built.
 
-## What nodes does this run on
+`rebar3 new hecate_service` generates the `Containerfile`, both CI
+workflows and a `deploy/docker-compose.yml` that runs the service. The
+registry and organisation are template variables: nothing here is
+specific to the fleet the authors happen to run.
 
-| Node | Role | Today | Future |
-|------|------|-------|--------|
-| beam00–03 (Tienen home cluster) | Realm services + dev workloads | ✅ canonical | continues |
-| Linode relay box (rented in Paris) | Edge realm services + relay-net | ✅ runs macula-station | hosts services as scale dictates |
-| Cooperative-contributed nodes (future) | Distributed realm services | ⏳ | new nodes join via realm provisioning |
-| **User laptops / MaculaOS** | hecate-daemon (per-identity) + macula-station | ✅ | services do **not** run here |
+## What runs where
 
-The line is hard: hecate-services run **for the realm, on realm
-infrastructure**. A user's laptop is a citizen, not an institution
-— it consults services across the mesh, doesn't host them.
+Services run **for a realm, on realm infrastructure**. A user's laptop
+is a citizen rather than an institution: it consults services across
+the mesh and does not host them.
 
 ## The image
 
-Built by `Containerfile` (see `templates/Containerfile.tmpl`):
+Two stages, both in the generated `Containerfile`.
 
-- **Stage 1** — `erlang:27-alpine`: fetch deps, `rebar3 as prod tar`.
-- **Stage 2** — `alpine:3.20`: just `libstdc++`, `ncurses-libs`,
-  `openssl`, the release tarball, and the entry script.
+The builder is `erlang:27-alpine` and installs a Rust toolchain,
+because macula ships a QUIC NIF. `MACULA_FORCE_SOURCE_BUILD=1` makes it
+compile that NIF here rather than fetch a prebuilt one, which would be
+linked against a different libc: the fetched artifact loads on the
+build host and then fails on alpine at runtime.
 
-Final image ~80 MB. Embedded ERTS. `HEALTHCHECK` hits
-`/health` on port 8470 every 30 s.
+Dependencies are fetched from `rebar.config` alone, before the source
+is copied, so editing `apps/` does not re-run the Rust build.
+
+The runtime stage is `alpine:3.22` with the assembled release, an
+embedded ERTS, and a `HEALTHCHECK` that hits `/health`.
+
+`LABEL org.opencontainers.image.source` links the package to its
+repository. On registries that read it, ghcr among them, a package
+without that label is an orphan: it does not appear on the repository
+page and does not inherit its visibility. A service that shipped
+private by accident failed its first pull with a bare `unauthorized`,
+which names nothing and sends you looking in the wrong place.
 
 ## CI publish
 
-`.github/workflows/build-push.yml` (template in
-`templates/ci-build-push.yml.tmpl`):
+`.github/workflows/build-push.yml` triggers on pushes to `main`,
+publishing `:latest`, and on `vX.Y.Z` tags, publishing `:X.Y.Z`. Both
+tags are pushed every time, so `:latest` can drive zero-touch updates
+while the semver tags remain for pinning.
 
-- Triggers on push to `main` (publishes `:latest`) and on `vX.Y.Z`
-  tags (publishes `:X.Y.Z`).
-- Uses `${{ secrets.GITHUB_TOKEN }}` to push to ghcr.io under the
-  `hecate-services` org.
-- Codeberg has Forgejo Actions disabled per the migration pattern;
-  CI runs on the GitHub mirror.
+One trap when pushing that file itself: an **HTTPS** push that creates
+or updates anything under `.github/workflows/` needs a token carrying
+the `workflow` scope, and the error names the file rather than the
+missing scope. Use an SSH remote and it does not arise.
 
-## Filesystem on an infrastructure node
+## Running it
 
-System-wide paths (not user home):
-
-```
-/etc/hecate/
-├── secrets/                       ← realm-signed service-principal certs
-│   ├── hecate-rag/
-│   │   └── service-cert.pem
-│   ├── hecate-dns/
-│   │   └── service-cert.pem
-│   └── …
-├── gitops/
-│   ├── system/
-│   │   ├── hecate-rag.container   ← Quadlet (declarative)
-│   │   ├── hecate-rag.env         ← per-service env
-│   │   ├── hecate-dns.container
-│   │   └── hecate-llm.container
-│   └── reconciler.log
-└── trust/                          ← realm root keys for verification
-    └── realm-root.pub
-
-/bulk0/hecate/                      ← per-service state on the beam node's bulk drive
-├── hecate-rag/
-│   ├── data/                       (SQLite read models)
-│   └── index/                      (persisted vector index files)
-├── hecate-dns/
-│   └── zones/
-└── hecate-llm/
-    └── models/                     (downloaded ONNX / GGUF blobs)
-
-/run/macula/
-└── station.sock                    (macula-station's local socket)
-```
-
-Beam-cluster note: application-specific data MUST live on the
-`/bulk` drives per the existing convention (see workspace
-`CLAUDE.md`). The boot eMMC is for OS only.
-
-## How a service lands on a node
-
-1. **CI** builds + pushes image: `ghcr.io/hecate-services/hecate-X:0.3.2` and `:latest`.
-2. **Operator** commits the Quadlet + env file to `hecate-gitops`:
-   ```
-   gitops/by-node/beam00/hecate-rag.container
-   gitops/by-node/beam00/hecate-rag.env
-   ```
-3. **hecate-gitops reconciler** on beam00 watches its node-bound dir,
-   symlinks the `.container` into `/etc/containers/systemd/`.
-4. **systemd** (system-wide) generates a unit from the Quadlet,
-   starts it.
-5. **Podman** pulls `:latest`, attaches the volumes, starts the
-   container. `AutoUpdate=registry` re-pulls on the next sweep when
-   `:latest` advances.
-6. **Service** boots, mounts its realm-signed cert, attaches to
-   `macula-station` via the station socket, advertises capabilities
-   onto the mesh, answers `/health`.
-
-## Provisioning the service-principal cert (v1)
-
-Before step 2 above, the realm has to mint the credential. v1 is a
-small admin script run from a realm-steward's box:
+`deploy/docker-compose.yml` in a generated service is runnable as-is:
 
 ```bash
-hecate-realm-admin services provision \
-    --service hecate-rag \
-    --node    beam00 \
-    --scope   "publish_summary,answer_query" \
-    --ttl     365d \
-    --out     ./out/hecate-rag-beam00-cert.pem
+HECATE_REALM=<64-hex> MACULA_STATION_SEEDS=https://station.example:4433 \
+  docker compose -p hecate-x -f deploy/docker-compose.yml up -d
 ```
 
-The cert is then copied (or committed in encrypted form) into
-`gitops/secrets/by-node/beam00/hecate-rag/service-cert.pem` and the
-reconciler places it under `/etc/hecate/secrets/hecate-rag/`.
+Two things in it are deliberate and worth keeping.
 
-v2 wires this into a realm HTTP endpoint and a gitops-trigger so the
-human step disappears. See `identity_model.md`.
+**Host networking.** macula stations are reachable over IPv6 only, and
+a default docker bridge has no IPv6, so a bridged container connects
+and then sits there with no healthy links, looking fine. If you do want
+a bridge, give it IPv6 explicitly. The cost of host networking is that a
+port already bound on the host fails **silently**, so choose the health
+port knowing what else runs there.
 
-## Quadlet template
+**The realm has no default.** A service that guesses its realm
+announces itself where nobody can attribute it, which is
+indistinguishable from a healthy node. Same for the station seeds:
+naming a realm costs nothing, dialling somebody's production station
+from every dev clone does.
 
-See `templates/quadlet.container.tmpl`. Highlights:
+## Separating the service from its placement
 
-- `Image=ghcr.io/hecate-services/{{service_name}}:latest`
-- `AutoUpdate=registry`
-- `After=macula-station.service` + `Requires=macula-station.service`
-- Mounts `/etc/hecate/secrets/<service>:/etc/hecate/secrets:ro`
-- Mounts `/bulk0/hecate/<service>:/var/lib/<service>:rw`
-- Mounts `/run/macula:/run/macula` (station socket)
-- `PublishPort=127.0.0.1:8470:8470` (health endpoint, loopback only)
-- `User=hecate` / `Group=hecate` (dedicated service user, never root)
-- `WantedBy=multi-user.target` (system instance, not `--user`)
+The compose file above carries what the **service** knows about itself:
+its image, its port, the environment variables its own code reads, its
+health check.
 
-## Network
+Whatever you deploy with should carry **placement**: which host, which
+station, which realm, which secret store. Keeping the two apart is what
+stops a configuration table in a README and the real environment
+drifting apart with nothing checking them.
 
-Services do not open externally-routable ports. They reach the
-local macula-station over its Unix socket; all cross-service and
-cross-node traffic flows through the station.
+The BEAM Campus fleet does this with a pull-based reconciler: each node
+runs a timer that fetches a GitOps repository and brings up the stacks
+listed in that node's manifest, with secrets seeded once out of band as
+0600 files. That is one arrangement, not a requirement of hecate_om.
 
-Health endpoint is exposed on `127.0.0.1:8470` only — for podman's
-HEALTHCHECK and local debugging on the host. Not reachable from
-outside the box.
+## Secrets
+
+`sys.config.src` expects the service-principal certificate at
+`/etc/hecate/secrets/service-cert.pem`, and the `Containerfile`
+declares that path as a volume. How the file gets there is the
+deployment's business.
+
+The realm tag arrives as `HECATE_REALM` and is translated into
+application environment by `sys.config.src`. That translation is the
+only place the shell variable and the application environment meet:
+`hecate_om_identity:realm/0` reads `application:get_env(hecate_om,
+realm)`, so exporting the shell variable and expecting that to be
+enough has cost a service an hour of confusion.
 
 ## Rollback
 
-`AutoUpdate=registry` always pulls `:latest`. Pin to a specific
-semver by editing the Quadlet's `Image=` to `:0.3.2` and committing
-to `hecate-gitops`. Reconciler picks it up on the next sweep.
+Pin the image to a semver tag instead of `:latest` and redeploy. Both
+tags are published by every CI run precisely so this works.
 
-## Multi-arch
+## Not built yet
 
-CI today builds `linux/amd64` only. Beam cluster is x86_64. Add
-`linux/arm64` to the matrix when the first arm64 service node
-joins.
+Stated so nothing here reads as describing a working system.
+
+The service-principal provisioning flow is manual today, and UCAN
+delegation is not wired: `identity_spec/0` is informational. See
+`identity_model.md`.
+
+Images are built for `linux/amd64` only. Add `linux/arm64` to the
+build matrix when the first arm64 node joins.

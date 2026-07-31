@@ -1,58 +1,66 @@
 # Anatomy of a hecate-service
 
-A Hecate service is one OTP release, one OCI container, one
-system-wide systemd-managed Podman unit running on a **realm
-infrastructure node** (BEAM cluster, relay box, cooperative-
-contributed service node — never a user laptop). Every service in
-`hecate-services/hecate-*` follows the same layout.
+A Hecate service is one OTP release and one OCI container, running on
+an infrastructure node rather than on a user's laptop. A laptop is a
+citizen: it consults services across the mesh, it does not host them.
+
+`rebar3 new hecate_service` generates the whole layout below; see the
+README for how to install the template.
 
 ## Repository layout
 
 ```
-hecate-services/hecate-X/
+<org>/hecate-X/
 ├── README.md
 ├── LICENSE
 ├── CHANGELOG.md
-├── manifest.json                ← service descriptor (capabilities, ports)
 ├── Containerfile                ← multi-stage Erlang build
-├── quadlet/
-│   └── hecate-X.container       ← systemd Quadlet unit
-├── rebar.config                 ← OTP deps incl. {hecate_om, "~> 0.1"}
-├── src/
-│   ├── hecate_X.app.src         ← `applications: [hecate_om, …]`
-│   ├── hecate_X_app.erl         ← `start/2 -> hecate_om:boot(hecate_X_service)`
-│   ├── hecate_X_sup.erl
-│   └── hecate_X_service.erl     ← implements hecate_om_service behaviour
-├── apps/                        ← vertical-sliced sub-apps (CMD/PRJ/QRY)
-│   ├── do_thing/                CMD
-│   ├── project_things/          PRJ
-│   └── query_things/            QRY
+├── rebar.config                 ← deps incl. {hecate_om, "~> 0.9"}, relx release
+├── apps/hecate_x/
+│   ├── src/
+│   │   ├── hecate_x.app.src     ← `applications: [hecate_om, …]`
+│   │   ├── hecate_x_app.erl     ← `start/2 -> hecate_om:boot(hecate_x_service)`
+│   │   ├── hecate_x_sup.erl
+│   │   └── hecate_x_service.erl ← implements hecate_om_service
+│   └── test/
+│       └── hecate_x_service_tests.erl
+├── config/
+│   ├── sys.config.src           ← realm, health port, station socket
+│   └── vm.args.src
+├── deploy/
+│   └── docker-compose.yml       ← how to run it
+├── scripts/
+│   └── health.sh
 └── .github/workflows/
-    └── build-push.yml           ← ghcr.io publish on main + tags
+    ├── lint.yml                 ← rebar3 lint + eunit
+    └── build-push.yml           ← image publish on main + tags
 ```
+
+A service that grows vertical slices adds them as further apps under
+`apps/`, one per capability, CMD / PRJ / QRY as the domain requires.
 
 ## Lifecycle
 
 ```
-podman pulls ghcr.io/hecate-services/hecate-X:latest
+the container runtime pulls <registry>/<org>/hecate-X:latest
    ↓
-systemd starts the container (Quadlet unit)
+Erlang VM boots → application:start(hecate_x)
    ↓
-Erlang VM boots → application:start(hecate_X)
-   ↓
-hecate_X_app:start/2 → hecate_om:boot(hecate_X_service)
+hecate_x_app:start/2 → hecate_om:boot(hecate_x_service)
    ↓
 hecate_om:
    ├── loads the service-principal cert from
-   │   /etc/hecate/secrets/service-cert.pem (mounted by the Quadlet)
+   │   /etc/hecate/secrets/service-cert.pem (a mounted volume)
    ├── registers capabilities() into hecate_om_capabilities
    ├── registers the service module into hecate_om_health
-   ├── (v2) auto-rotates short-lived UCANs against hecate-realm
-   └── calls hecate_X_service:start(Opts) → hecate_X_sup:start_link()
+   ├── wires a reckon-db store IF the service exports store_id/0
+   │   and data_dir/0; producer-only services pay nothing
+   ├── (planned) auto-rotates short-lived UCANs against hecate-realm
+   └── calls hecate_x_service:start(Opts) → hecate_x_sup:start_link()
    ↓
-hecate_om_capabilities:publish/0 fans capabilities onto macula bloom-channel
+hecate_om_capabilities:publish/0 announces capabilities on the mesh
    ↓
-GET /health (port 8470) ready to answer
+GET /health ready to answer, on the port sys.config.src was given
    ↓
 Service is live.
 ```

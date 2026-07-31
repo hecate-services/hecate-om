@@ -5,6 +5,12 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-31
+
+No change to `src/`. This release is the scaffold, its guard, and a
+documentation pass; consumers of the library itself get the same behaviour
+they had on 0.8.0.
+
 ### Added
 
 - **`rebar3 new hecate_service`**, a real rebar3 template in `priv/templates`,
@@ -30,6 +36,20 @@ Versioning: [SemVer](https://semver.org/).
   kebab-case repository name. It previously rendered a handful of files with sed
   and left you to write `rebar.config`, the `.app.src` and the supervisor by
   hand, so a scaffolded service did not compile.
+
+### Fixed
+
+- The hex package links and the ex_doc `source_url` pointed at Codeberg.
+  GitHub has been canonical since 2026-07-26.
+- `guides/container_deployment.md` described a deployment that does not exist:
+  system-wide Podman Quadlets reconciled by `hecate-gitops`, a
+  `hecate-realm-admin` CLI, a loopback-published health port. It referenced
+  three template files that no longer exist. Rewritten to describe what the
+  generated service actually does, with a closing section naming what is
+  intended rather than built.
+- `guides/service_anatomy.md` showed a repository layout with `quadlet/`, a
+  `manifest.json` and a flat `src/`, none of which the scaffold produces.
+- The README's status line claimed v0.5.0.
 
 ### Removed
 
