@@ -5,6 +5,27 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **The generated suite now checks that the two OTP pins agree, and that you are
+  running what they name.** `rebar3 new hecate_service` has always pinned the
+  release in two files, the `Containerfile` and `.github/workflows/lint.yml`, and
+  0.9.0's own commit message said they must agree. Nothing enforced it.
+
+  A sibling service shipped with its `Containerfile` on 27 while development ran
+  on 28, so a local `rebar3 eunit` meant "passing on 28" and nothing more, CI
+  failed for three commits on a crash that does not occur on 28 at all, and
+  because the image build is a separate workflow the image reached the fleet
+  regardless.
+
+  The generated `*_service_tests.erl` now reads both files and compares them
+  against `erlang:system_info(otp_release)`. **It fails rather than warns when
+  the running VM differs**, because developing on a release you do not ship makes
+  a green suite mean less than it appears to. Moving to another release means
+  moving both pins, which is the point of having them.
+
+  No change to `src/`.
+
 ## [0.9.0] - 2026-07-31
 
 No change to `src/`. This release is the scaffold, its guard, and a

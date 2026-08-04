@@ -90,3 +90,50 @@ supervisor_starts_and_stops_test() ->
     ?assertEqual([], supervisor:which_children(Pid)),
     unlink(Pid),
     exit(Pid, shutdown).
+
+%%==============================================================================
+%% The runtime is pinned in two places, and neither is the one you are running
+%%==============================================================================
+
+%% ⚠ THIS GUARD EXISTS BECAUSE A SIBLING SERVICE DID NOT HAVE IT, AND IT COST
+%% THREE COMMITS AND AN IMAGE THAT SHIPPED ANYWAY.
+%%
+%% Its `Containerfile' said 27 while development ran on 28. So `rebar3 eunit'
+%% passing locally meant "passing on 28" and nothing more, CI failed on a crash
+%% that does not occur on 28 at all, and because the image build is a separate
+%% workflow the image went to the fleet regardless.
+%%
+%% The release is pinned in TWO files, and the version actually running is a
+%% third thing that agrees with neither by default. **A comment in each file
+%% saying they must match is not a mechanism**, and both files carried one.
+%%
+%% ⚠⚠ IT FAILS RATHER THAN WARNS WHEN YOUR VM DIFFERS, AND THAT IS DELIBERATE.
+%% Developing on a release you do not ship makes a green suite mean less than it
+%% appears to. If you want to work on another release, move both pins and find
+%% out what breaks, which is the whole point of having them.
+the_runtime_agrees_between_the_image_the_ci_and_this_vm_test() ->
+    Image = pinned("Containerfile", "FROM docker.io/erlang:([0-9]+)"),
+    Ci = pinned(".github/workflows/lint.yml", "image: erlang:([0-9]+)"),
+    Running = list_to_binary(erlang:system_info(otp_release)),
+    %% Sorted and deduplicated, so a failure prints all three rather than the
+    %% first pair that happened to be compared.
+    ?assertEqual([Image], lists:usort([Image, Ci, Running])).
+
+pinned(Relative, Pattern) ->
+    {ok, Text} = file:read_file(alongside(Relative)),
+    {match, [Version]} = re:run(Text, Pattern,
+                                [{capture, all_but_first, binary}]),
+    Version.
+
+%% Relative to the beam rather than the working directory, because eunit runs
+%% from wherever the developer happens to be standing.
+alongside(Name) -> climb(filename:dirname(code:which(?MODULE)), Name, 8).
+
+climb(_Dir, Name, 0) -> Name;
+climb(Dir, Name, Left) ->
+    Candidate = filename:join(Dir, Name),
+    found(filelib:is_regular(Candidate), Candidate, Dir, Name, Left).
+
+found(true, Candidate, _Dir, _Name, _Left) -> Candidate;
+found(false, _Candidate, Dir, Name, Left) ->
+    climb(filename:dirname(Dir), Name, Left - 1).
