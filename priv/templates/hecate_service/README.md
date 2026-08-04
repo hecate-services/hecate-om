@@ -77,6 +77,11 @@ with a second one asserting the `evoq` block is present at all. Keep both.
 ⚠ **`deploy/docker-compose.yml` mounts a volume, and on a node it must.** Without
 it the record lives inside the container and every recreate destroys it, which is
 the same as not keeping one.
+
+The store is node-local. To make it span every node running the same `store_id`,
+export the optional `store_mode/0` callback returning `cluster`, and `hecate_om`
+starts it with reckon-db discovery and Ra clustering. It is not generated,
+because `single` is the default and a scaffold should not decide that for you.
 <%/store%><%^store%>### Adding a store later
 
 This service has no `reckon-db` store, which is the right answer for most. The
