@@ -63,9 +63,36 @@ Six callbacks in `<%name%>_service`, all required, all resolved **by name** by
 attribute turns a missing one into a compile error rather than an `undef` where
 nobody is watching, and the eunit suite guards the attribute itself.
 
-To make this a CMD/PRJ service that owns a `reckon-db` event store, export
-`store_id/0` and `data_dir/0` as well. `hecate_om:boot/1` starts the store and
-its evoq subscription before `start/1` fires.
+<%#store%>### The store
+
+This service was scaffolded with `store=1`, so it owns a `reckon-db` store called
+`<%name%>_store`. `store_id/0` and `data_dir/0` are exported, `hecate_om:boot/1`
+opens the store and its evoq subscription before `start/1` fires, and
+`config/sys.config.src` carries the `evoq` adapter block that boot requires.
+
+⚠ **The store id is written in two places**, `store_id/0` and the `evoq` block,
+and nothing makes them agree by itself. A generated test compares them, along
+with a second one asserting the `evoq` block is present at all. Keep both.
+
+⚠ **`deploy/docker-compose.yml` mounts a volume, and on a node it must.** Without
+it the record lives inside the container and every recreate destroys it, which is
+the same as not keeping one.
+<%/store%><%^store%>### Adding a store later
+
+This service has no `reckon-db` store, which is the right answer for most. The
+reckon-db applications run either way; what a store adds is a data directory, an
+open handle, and something written.
+
+The cheapest way to get one is to scaffold again with `store=1`, which generates
+the callbacks, the config and the guards together.
+
+⚠ **By hand it is three things and not one, and the missing third crash-loops the
+node.** Export `store_id/0` and `data_dir/0`; add the `evoq` adapter block to
+`config/sys.config.src`, without which boot raises
+`{not_configured, event_store_adapter}` before any service code runs; and mount a
+volume in the compose file. A sibling service put two of three fleet nodes into a
+boot loop by doing the first and not the second.
+<%/store%>
 
 ## Licence
 

@@ -7,6 +7,28 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- **`store` variable on `rebar3 new hecate_service`, off by default.** Empty
+  generates a storeless service exactly as before, which is what most services
+  want. `store=1` generates the whole thing at once: `store_id/0` and
+  `data_dir/0`, a store named `<name>_store`, the `evoq` adapter block in
+  `config/sys.config.src`, a data volume and `HECATE_DATA_DIR` in the compose
+  file, and three boundary guards keeping them in step.
+
+  It exists because adding a store by hand is **three** things and not one, and
+  omitting the third crash-loops the node before any service code runs. A sibling
+  service put two of three fleet nodes into a boot loop by exporting the
+  callbacks without adding the `evoq` block, which raises
+  `{not_configured, event_store_adapter}` at release boot. The generated README
+  says the same thing in both branches, so a service scaffolded without a store
+  is told what adding one really costs.
+
+  ⚠ **The value must be exactly one character, so `1` and not `yes`.** rebar3
+  passes template variables as strings and mustache iterates a string as a list,
+  so a longer value repeats every conditional block once per character. That is a
+  limitation of the template engine rather than a preference, it is documented on
+  the variable itself, and it fails loudly at the first `rebar3 compile` with
+  `spec for store_id/0 already defined` rather than shipping anything.
+
 - **The generated suite now checks that the two OTP pins agree, and that you are
   running what they name.** `rebar3 new hecate_service` has always pinned the
   release in two files, the `Containerfile` and `.github/workflows/lint.yml`, and

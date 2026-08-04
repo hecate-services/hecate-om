@@ -15,6 +15,31 @@
         %% hour, because nothing translates between the two by itself.
         {realm,             <<"${HECATE_REALM}">>}
     ]},
-
+<%#store%>
+    %% ==========================================================================
+    %% EVOQ'S ADAPTER, WITHOUT WHICH THIS NODE DOES NOT BOOT
+    %% ==========================================================================
+    %%
+    %% ⚠ MANDATORY BECAUSE THIS SERVICE EXPORTS `store_id/0'. `hecate_om:boot/1'
+    %% then starts the store AND a per-store evoq subscription, and that
+    %% subscription reads the global log through evoq, which crashes on
+    %% `{not_configured, event_store_adapter}' if this block is absent. evoq
+    %% starts as a release-boot application before any service's `start/2' runs,
+    %% so hecate_om cannot inject it at runtime.
+    %%
+    %% `hecate_om_store' documents this in its own module header, calling it
+    %% MANDATORY, and a sibling service still put two of three fleet nodes into a
+    %% boot-crash loop because the callbacks were added without reading it. That
+    %% is why this block is generated rather than left to be discovered.
+    {evoq, [
+        {event_store_adapter,    reckon_evoq_adapter},
+        {subscription_adapter,   reckon_evoq_adapter},
+        {snapshot_store_adapter, reckon_evoq_adapter},
+        %% A fallback evoq resolves before it knows whether anything dispatches a
+        %% command. It must name the SAME store as `store_id/0', and a generated
+        %% test compares the two.
+        {store_id,               <%name%>_store}
+    ]},
+<%/store%>
     {kernel, [{logger_level, info}]}
 ].

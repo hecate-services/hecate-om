@@ -16,6 +16,30 @@
 -behaviour(hecate_om_service).
 
 -export([info/0, start/1, stop/1, health/0, capabilities/0, identity_spec/0]).
+<%#store%>
+%% ==========================================================================
+%% AND TWO OPTIONAL ONES, WHICH TURN THE STORE ON
+%% ==========================================================================
+%%
+%% Generated because this service was scaffolded with `store=1'. Exporting
+%% `store_id/0' and `data_dir/0' TOGETHER makes `hecate_om:boot/1' open a
+%% reckon-db store before this module's `start/1' fires.
+%%
+%% ⚠ THE reckon-db APPLICATIONS RUN EITHER WAY. `reckon_db', `reckon_evoq',
+%% `reckon_gater', `evoq', `khepri' and `ra' start with `hecate_om' whether these
+%% callbacks exist or not. What the two add is a STORE: a data directory, an open
+%% handle, and something written. A sibling service claimed for months that they
+%% suppressed the whole stack while six of its thirty-one running applications
+%% quietly disproved it.
+%%
+%% ⚠⚠ AND `config/sys.config.src' MUST CARRY THE `evoq' BLOCK, which is why it was
+%% generated with one. hecate_om starts a per-store evoq subscription that reads
+%% the global log, and that crashes on `{not_configured, event_store_adapter}'
+%% without it. evoq starts as a release-boot application before any service's
+%% `start/2' runs, so nothing can inject it later. A sibling put two of three
+%% fleet nodes into a boot-crash loop this exact way.
+-export([store_id/0, data_dir/0]).
+<%/store%>
 
 info() ->
     #{name => <<"<%repo%>">>,
@@ -47,3 +71,31 @@ identity_spec() ->
       actions => [],
       resources => [],
       ttl_days => 30}.
+<%#store%>
+
+%% ==========================================================================
+%% The store
+%% ==========================================================================
+
+%% @doc The reckon-db store this service owns.
+%%
+%% ⚠ IT IS NAMED IN TWO PLACES, here and in the `evoq' block of
+%% `config/sys.config.src', and nothing makes them agree by itself. Disagreeing
+%% opens one store and addresses another. A generated test compares the two.
+-spec store_id() -> atom().
+store_id() -> <%name%>_store.
+
+%% @doc Where it lives on disk.
+%%
+%% ⚠ DEFAULTS TO A PATH INSIDE THE CONTAINER AND MUST NOT STAY THERE ON A NODE.
+%% The fleet keeps application data on its `/bulk' drives and boots from a small
+%% eMMC, so `deploy/docker-compose.yml' mounts a volume and sets this. The default
+%% is what a laptop wants; a container without the mount loses its record on every
+%% recreate, which is the same as not keeping one.
+-spec data_dir() -> string().
+data_dir() -> chosen(os:getenv("HECATE_DATA_DIR")).
+
+chosen(false) -> "/tmp/<%name%>";
+chosen("") -> "/tmp/<%name%>";
+chosen(Path) -> Path.
+<%/store%>
