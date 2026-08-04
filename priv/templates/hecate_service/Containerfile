@@ -7,7 +7,16 @@
 # together with the code that writes it, and declare it here and in the compose
 # file at the same time.
 
-FROM docker.io/erlang:27-alpine AS builder
+# ⚠ THE RUNTIME IS PINNED IN TWO PLACES AND THEY MUST AGREE: here and `lint.yml'
+# beside it. A generated service that builds on one release and tests on another
+# only ever proves "the tests pass on the CI release".
+#
+# This template said 27 from the beginning and nothing revisited it, so every
+# service scaffolded from it inherited 27 while development machines moved on.
+# In `hecate-biotope' that cost three commits of red CI on a crash that does not
+# occur on the development release at all, and because `build-push.yml' is a
+# separate workflow the image shipped to the fleet regardless.
+FROM docker.io/erlang:28-alpine AS builder
 WORKDIR /build
 
 # macula ships a QUIC NIF. MACULA_FORCE_SOURCE_BUILD makes it build here rather

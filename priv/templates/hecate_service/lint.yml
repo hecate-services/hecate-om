@@ -14,7 +14,8 @@ jobs:
   check:
     runs-on: ubuntu-latest
     container:
-      image: erlang:27
+      # ⚠ MUST MATCH THE `Containerfile' beside it. See the note there.
+      image: erlang:28
     steps:
       - uses: actions/checkout@v4
       - run: rebar3 lint
