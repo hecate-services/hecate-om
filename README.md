@@ -3,10 +3,18 @@
 **Hecate-over-mesh**: the shared substrate every `hecate-services/hecate-X`
 service daemon stands on.
 
-Services in this org run on **realm infrastructure nodes** (the BEAM
-cluster, dedicated relay boxes, cooperative-contributed service
-nodes), not on user laptops. They are institutions, not user agents
-— see [`guides/identity_model.md`](guides/identity_model.md) for the
+Services in this org are **edge-first**. A service runs wherever its
+operator puts it (a cooperative infrastructure node, a relay box, a lab
+machine, a laptop) and **dials out** to a `macula-station` over QUIC. It
+needs no inbound port, no public address and nothing underneath it: the
+station it dials is what puts it on the mesh, and that is how a service
+on one edge box reaches a service on another.
+
+Placement is therefore a deployment decision, not a property of the
+substrate. What a service always carries with it is its own
+**service-principal identity**. It answers as itself, chaining to a realm
+root, never as the human whose machine it happens to be running on. See
+[`guides/identity_model.md`](guides/identity_model.md) for the
 town/library metaphor that drives the identity choices.
 
 ```
@@ -45,7 +53,9 @@ It **is not**:
 - A plugin host. Services are containerised. Plugins live in
   `hecate-daemon` (different repo, different model).
 - A network library. Services talk to `macula-station` via the
-  macula SDK like any other Macula client.
+  macula SDK like any other Macula client: **outbound only**. The
+  station does the peering, the DHT and the routing, which is what
+  lets a service sit behind NAT at the edge and still be reachable.
 
 ## Layering position
 
@@ -57,9 +67,10 @@ Layer 3 — session     hecate-daemon
                       Per-identity, plugin host, UI surface
 
 Layer 2 — services    hecate-services/hecate-rag, -llm, -dns, -git, …
-                      Always-on, containerised, system-class workloads.
-                      Run on realm infrastructure nodes (BEAM cluster,
-                      relay boxes), never on user laptops.
+                      Always-on, containerised, system-class workloads,
+                      each with its own service-principal identity.
+                      Run at the edge or on realm infrastructure; either
+                      way they dial out to a station.
                       ↑↑↑ this library is the substrate ↑↑↑
 
 Layer 1 — identity    hecate-realm / macula-realm
@@ -67,8 +78,11 @@ Layer 1 — identity    hecate-realm / macula-realm
 Layer 0 — kernel      macula-station
 ```
 
-See [`philosophy/HECATE_TIER_MODEL.md`](https://codeberg.org/hecate-social/hecate-corpus/src/branch/main/philosophy/HECATE_TIER_MODEL.md)
-in hecate-corpus for the longer cut-criteria discussion.
+See [`philosophy/HECATE_TIER_MODEL.md`](https://github.com/hecate-social/hecate-corpus/blob/main/philosophy/HECATE_TIER_MODEL.md)
+in hecate-corpus for the longer cut-criteria discussion. Note that the
+tier model still phrases the L2 placement rule absolutely ("NOT on user
+laptops"); read that as a policy about where the realm's own shared
+services belong, not as a limit on what a hecate-om service can do.
 
 ## The contract
 

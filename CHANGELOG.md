@@ -48,6 +48,27 @@ Versioning: [SemVer](https://semver.org/).
 
   No change to `src/`.
 
+### Fixed
+
+- **README no longer claims services never run on user laptops.** It said
+  Layer-2 services "run on realm infrastructure nodes ... not on user
+  laptops. They are institutions, not user agents", in the opening
+  paragraph and again in the layering diagram. That is a deployment
+  policy for the realm's own shared services, stated as if it were a
+  property of this substrate, and it is the wrong way round: a hecate-om
+  service is **edge-first**. It dials out to a `macula-station` over
+  QUIC, needs no inbound port and no public address, and reaches its
+  peers through the station. Running one on a laptop is the ordinary
+  case, not an exception.
+
+  What the sentence was reaching for is the identity rule, which stands
+  and is now stated on its own: a service answers with its own
+  service-principal credential chaining to a realm root, never as the
+  human whose machine it runs on. Placement is a deployment decision;
+  identity is not.
+
+  No change to `src/`.
+
 ## [0.9.0] - 2026-07-31
 
 No change to `src/`. This release is the scaffold, its guard, and a
