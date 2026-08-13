@@ -3,7 +3,42 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.10.0] - 2026-08-13
+
+### Changed
+
+- **Requires macula `~> 8.0`** (was `~> 7.0`). This is the release that lets a
+  hecate-om service say WHY it refused.
+
+  macula 8.0.0 stopped answering `{error, {call_error, 16#0F, unknown_error}}`
+  when a handler returns `{error, Reason}` and now returns the handler's own
+  reason. `0x0F` is the code the SDK stamps when a handler says no, so it never
+  meant "unknown error" in practice — it meant a service had refused and could
+  not tell you why. Every refusal in the world arrived as the same three words.
+
+  ```erlang
+  %% handler
+  handle(_) -> {error, <<"hold_full">>}.
+
+  %% caller, on 7.x
+  {error, {call_error, 15, unknown_error}}
+  %% caller, on 8.x
+  {error, <<"hold_full">>}
+  ```
+
+  Measured rather than assumed: a two-service torture across two live stations
+  with no direct edge fails this on 7.0.0 with exactly the old constant and
+  passes on 8.0.0 with the reason intact.
+
+  **Consumer impact.** Nothing in this library matches the old shape — there is
+  no `call_error` or `unknown_error` anywhere in `src/`, `priv/` or `test/`. A
+  consumer that pattern-matches `{error, {call_error, _, _}}` on a REFUSAL will
+  stop matching; one that matches `{error, _}` is unaffected. Transport failures
+  keep the `{call_error, Code, Name}` shape, so only the handler-refusal case
+  changes.
+
+  ⚠ A binary reason now crosses the wire verbatim; non-binary reasons arrive as
+  printed binaries. See macula CHANGELOG 8.0.0.
 
 ### Added
 
