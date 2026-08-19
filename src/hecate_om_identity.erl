@@ -19,13 +19,20 @@
 -module(hecate_om_identity).
 -behaviour(gen_server).
 
--export([start_link/0, service_cert/0, macula_client/0, realm/0]).
+-export([start_link/0, service_cert/0, macula_client/0, realm/0, keypair/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
     cert      :: binary() | undefined,
     client    :: pid()    | undefined,
-    realm     :: binary() | undefined   %% 32-byte realm tag
+    realm     :: binary() | undefined,  %% 32-byte realm tag
+    %% Stable service keypair, loaded from `identity_key_path' at boot
+    %% and RETAINED so the service can sign its own DHT records
+    %% (procedure_advertisement). Undefined when the service runs on an
+    %% ephemeral SDK identity — such a service peers and calls fine but
+    %% cannot sign records, so it is (correctly) invisible to DHT
+    %% discovery.
+    keypair   :: macula_identity:key_pair() | undefined
 }).
 
 %% Retry cadence for (re)attaching the mesh pool.
@@ -43,19 +50,28 @@ macula_client() ->
 realm() ->
     gen_server:call(?MODULE, realm).
 
+%% @doc The service's stable signing keypair, or `{error, no_keypair}'
+%% when running on an ephemeral identity. Callers that sign DHT records
+%% degrade to no-op on the error.
+-spec keypair() -> {ok, macula_identity:key_pair()} | {error, no_keypair}.
+keypair() ->
+    gen_server:call(?MODULE, keypair).
+
 init([]) ->
     Cert  = case load_cert() of
         {ok, C}    -> C;
         {error, _} -> undefined
     end,
-    Realm = load_realm(),
+    Realm   = load_realm(),
+    KeyPair = load_keypair(),
     %% Connect off the init path and retry. At boot hecate_om may start
     %% before the macula SDK app is fully up, so a single inline connect
     %% races it and loses (the bug that kept services dark even with seeds).
     %% handle_info(connect) attempts + reschedules until a pool attaches,
     %% and re-attaches if the pool later dies.
     self() ! connect,
-    {ok, #state{cert = Cert, client = undefined, realm = Realm}}.
+    {ok, #state{cert = Cert, client = undefined, realm = Realm,
+                keypair = KeyPair}}.
 
 handle_call(service_cert, _From, #state{cert = undefined} = S) ->
     {reply, {error, no_cert}, S};
@@ -72,13 +88,18 @@ handle_call(realm, _From, #state{realm = undefined} = S) ->
 handle_call(realm, _From, #state{realm = R} = S) ->
     {reply, {ok, R}, S};
 
+handle_call(keypair, _From, #state{keypair = undefined} = S) ->
+    {reply, {error, no_keypair}, S};
+handle_call(keypair, _From, #state{keypair = Kp} = S) ->
+    {reply, {ok, Kp}, S};
+
 handle_call(_Msg, _From, S) ->
     {reply, {error, unknown_call}, S}.
 
 handle_cast(_Msg, S) -> {noreply, S}.
 
-handle_info(connect, #state{client = undefined} = S) ->
-    case attach_client() of
+handle_info(connect, #state{client = undefined, keypair = Kp} = S) ->
+    case attach_client(Kp) of
         undefined ->
             erlang:send_after(?RECONNECT_MS, self(), connect),
             {noreply, S};
@@ -134,33 +155,38 @@ load_realm() ->
 %% to connect was spurious (it kept every service dark). The cert is still
 %% loaded + held (`service_cert/0') for the v2 swap-in, when the SDK enforces
 %% realm-signed identity and this is where it gets passed.
-attach_client() ->
-    connect_seeds(configured_seeds()).
+attach_client(KeyPair) ->
+    connect_seeds(configured_seeds(), KeyPair).
 
-connect_seeds([]) ->
+connect_seeds([], _KeyPair) ->
     undefined;
-connect_seeds(Seeds) ->
-    try macula:connect(Seeds, identity_opts()) of
+connect_seeds(Seeds, KeyPair) ->
+    try macula:connect(Seeds, keypair_opts(KeyPair)) of
         {ok, Pool}    -> Pool;
         {error, _Why} -> undefined
     catch
         _:_ -> undefined
     end.
 
-%% Use a stable on-disk service keypair (macula-native format, via
-%% `macula_identity:save/2') when one is configured + loadable; otherwise
-%% let the SDK auto-generate an ephemeral identity. Either way the service
-%% connects and can publish — the identity is for peering, not authorization.
-identity_opts() ->
-    identity_from(application:get_env(hecate_om, identity_key_path)).
+%% Load the stable on-disk service keypair (macula-native format, via
+%% `macula_identity:save/2') when `identity_key_path' is configured +
+%% loadable; otherwise `undefined' and the SDK auto-generates an ephemeral
+%% identity at connect. The keypair is for peering AND for signing the
+%% service's own DHT records — an ephemeral service peers and calls fine
+%% but cannot advertise procedure records.
+load_keypair() ->
+    keypair_from(application:get_env(hecate_om, identity_key_path)).
 
-identity_from({ok, Path}) ->
-    loaded_identity(macula_identity:load(Path));
-identity_from(undefined) ->
-    #{}.
+keypair_from({ok, Path}) ->
+    loaded_keypair(macula_identity:load(Path));
+keypair_from(undefined) ->
+    undefined.
 
-loaded_identity({ok, KeyPair}) -> #{identity => KeyPair};
-loaded_identity({error, _})    -> #{}.
+loaded_keypair({ok, Kp})   -> Kp;
+loaded_keypair({error, _}) -> undefined.
+
+keypair_opts(undefined) -> #{};
+keypair_opts(KeyPair)   -> #{identity => KeyPair}.
 
 %% Station seeds, in precedence order:
 %%   1. MACULA_STATION_SEEDS env var (comma-separated URLs) — lets each
