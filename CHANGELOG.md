@@ -3,6 +3,32 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.11.0] - 2026-08-19
+
+### Changed
+
+- **Capability discovery is now DHT record-based, replacing the pubsub
+  `_mesh.cap.announce` broadcast.** On capability register (and a 30s republish
+  tick) a service writes one signed `procedure_advertisement` per capability to
+  the mesh DHT (advertiser = the service's key, serving_station = a connected
+  station, procedure_uri = realm-namespaced capability name). `lookup/1` resolves
+  by reading those records via `macula:find_records/2`, verifying each signature,
+  and returns `{ok, [#{advertiser, serving_station}]}` — a consumer then dials one
+  of those stations directly (direct-dial discovery, no multi-hop).
+- **Requires macula `~> 8.2`** (was `~> 8.0`): uses `find_records/2`,
+  `read_procedure_advertisement/1`, `procedure_key/1` from macula 8.2.0.
+
+### Added
+
+- `hecate_om_identity:keypair/0` — the service's retained stable signing keypair,
+  or `{error, no_keypair}` for an ephemeral service (which is then not advertised
+  and stays invisible to DHT discovery, by design).
+
+### Removed
+
+- The pubsub `_mesh.cap.announce' publish/subscribe path and `peers/0`. There
+  were no callers of the old `lookup/1' summary shape.
+
 ## [0.10.0] - 2026-08-13
 
 ### Changed
