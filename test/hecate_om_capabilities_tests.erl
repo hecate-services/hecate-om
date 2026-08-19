@@ -68,6 +68,14 @@ decode_resolved_drops_tampered_and_foreign_records_test() ->
     ?assertEqual([#{advertiser => macula_identity:public(Kp),
                     serving_station => St}], Got).
 
+station_url_brackets_ipv6_only_test() ->
+    ?assertEqual(<<"quic://[::1]:4433">>,
+                 hecate_om_capabilities:station_url(<<"::1">>, 4433)),
+    ?assertEqual(<<"quic://[2001:db8::5]:9000">>,
+                 hecate_om_capabilities:station_url(<<"2001:db8::5">>, 9000)),
+    ?assertEqual(<<"quic://10.0.0.7:4433">>,
+                 hecate_om_capabilities:station_url(<<"10.0.0.7">>, 4433)).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.
@@ -86,7 +94,11 @@ gen_server_degrades_without_mesh_test_() ->
          %% resolution with no pool yields an empty set, not a crash
          ?_assertEqual({ok, []}, hecate_om_capabilities:lookup(<<"svc.do">>)),
          %% and identity reports the missing signing key cleanly
-         ?_assertEqual({error, no_keypair}, hecate_om_identity:keypair())
+         ?_assertEqual({error, no_keypair}, hecate_om_identity:keypair()),
+         %% call_capability with no pool degrades, does not crash
+         ?_assertEqual({error, not_configured},
+                       hecate_om_capabilities:call_capability(<<"svc.do">>,
+                                                              #{}, 1_000))
         ]
      end}.
 
