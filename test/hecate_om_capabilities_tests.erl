@@ -67,3 +67,35 @@ decode_resolved_drops_tampered_and_foreign_records_test() ->
     Got = hecate_om_capabilities:decode_resolved([Tampered, Node, Good]),
     ?assertEqual([#{advertiser => macula_identity:public(Kp),
                     serving_station => St}], Got).
+
+%%% gen_server + graceful degradation (no mesh) — this is the path that
+%%% actually runs at boot before a pool/keypair are present. Exercises
+%%% init, register/publish/lookup/list, and the no-op / empty degradation.
+
+gen_server_degrades_without_mesh_test_() ->
+    {setup, fun start_servers/0, fun stop_servers/1,
+     fun(_) ->
+        Cap = #{name => <<"svc.do">>, version => 1},
+        [
+         %% register + publish must not crash when there is no pool /
+         %% keypair / realm — they no-op and the timer retries later.
+         ?_assertEqual(ok, hecate_om_capabilities:register([Cap])),
+         ?_assertEqual(ok, hecate_om_capabilities:publish()),
+         %% own caps are still reported (used by /health + the SUITE)
+         ?_assertEqual([Cap], hecate_om_capabilities:list()),
+         %% resolution with no pool yields an empty set, not a crash
+         ?_assertEqual({ok, []}, hecate_om_capabilities:lookup(<<"svc.do">>)),
+         %% and identity reports the missing signing key cleanly
+         ?_assertEqual({error, no_keypair}, hecate_om_identity:keypair())
+        ]
+     end}.
+
+start_servers() ->
+    {ok, I} = hecate_om_identity:start_link(),
+    {ok, C} = hecate_om_capabilities:start_link(),
+    {I, C}.
+
+stop_servers({I, C}) ->
+    catch gen_server:stop(C),
+    catch gen_server:stop(I),
+    ok.
