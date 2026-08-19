@@ -3,6 +3,26 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.14.0] - 2026-08-19
+
+### Changed
+
+- Slice 7c verify switched to **Direction B** (managed-realm X.509 cert chain),
+  replacing the Ed25519 delegation-record chain that could never go live (the realm
+  tag is a keyless `SHA-256(name)` and the realm holds no signing key). Requires
+  macula `~> 8.7`.
+  - Advertise: `hecate_om_capabilities:build_advertisement/6` embeds the service's
+    cert chain (leaf ++ org CA) in the `procedure_advertisement`, from
+    `hecate_om_identity:cert_chain/0`. Services with no provisioned chain advertise
+    without one (open-mode only).
+  - Verify: under `verify => true`, providers are kept only if their embedded chain
+    verifies to the realm CA (`macula_record:verify_advertisement_cert_chain/3`,
+    org-scoped) instead of resolving `org_directory` / `procedure_delegation`
+    records. No realm CA provisioned → every provider dropped.
+  - `hecate_om_identity` loads the org CA (`org_ca_cert_path`, default
+    `/etc/hecate/secrets/org-ca.pem`) and realm CA (`realm_ca_cert_path`, default
+    `/etc/hecate/secrets/realm-ca.pem`); exposes `cert_chain/0` and `realm_ca/0`.
+
 ## [0.13.0] - 2026-08-19
 
 ### Added

@@ -6,6 +6,7 @@
 %%% same key on both sides, and decodes/verifies what it reads back.
 -module(hecate_om_capabilities_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include_lib("public_key/include/public_key.hrl").
 
 realm()      -> crypto:strong_rand_bytes(32).
 station()    -> crypto:strong_rand_bytes(32).
@@ -76,6 +77,44 @@ station_url_brackets_ipv6_only_test() ->
     ?assertEqual(<<"quic://10.0.0.7:4433">>,
                  hecate_om_capabilities:station_url(<<"10.0.0.7">>, 4433)).
 
+%%% Direct-dial dual-trust (Slice 7c Direction B) — the advertise side
+%%% embeds the service cert chain; the SDK verifies it to the realm CA.
+
+%% build_advertisement/6 embeds the cert chain so a verifying consumer
+%% can read it back off the record; /5 leaves it absent (open-mode).
+build_advertisement_embeds_cert_chain_test() ->
+    Kp    = macula_identity:generate(),
+    R     = realm(),
+    St    = station(),
+    Chain = <<"-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n">>,
+    With  = hecate_om_capabilities:build_advertisement(
+              Kp, R, <<"acme">>, cap(<<"svc.do">>), St, #{cert_chain => Chain}),
+    Without = hecate_om_capabilities:build_advertisement(
+                Kp, R, <<"acme">>, cap(<<"svc.do">>), St),
+    ?assertMatch(#{cert_chain := Chain},
+                 macula_record:read_procedure_advertisement(With)),
+    ?assertMatch(#{cert_chain := undefined},
+                 macula_record:read_procedure_advertisement(Without)).
+
+%% An advertisement built with a REAL service-cert chain verifies to the
+%% realm CA via the SDK; the same capability advertised without a chain
+%% (a would-be squatter in verify-mode) is rejected as no_cert_chain.
+%% This proves the embed side produces records the verify side accepts.
+build_advertisement_chain_verifies_to_realm_ca_test() ->
+    Kp     = macula_identity:generate(),
+    AdvKey = macula_identity:public(Kp),
+    R      = realm(),
+    St     = station(),
+    #{realm_ca := RealmCa, chain := Chain} = issue_chain(AdvKey, <<"acme">>),
+    Good = hecate_om_capabilities:build_advertisement(
+             Kp, R, <<"acme">>, cap(<<"svc.do">>), St, #{cert_chain => Chain}),
+    NoChain = hecate_om_capabilities:build_advertisement(
+                Kp, R, <<"acme">>, cap(<<"svc.do">>), St),
+    ?assertEqual(ok,
+                 macula_record:verify_advertisement_cert_chain(RealmCa, Good, <<"acme">>)),
+    ?assertEqual({error, no_cert_chain},
+                 macula_record:verify_advertisement_cert_chain(RealmCa, NoChain, <<"acme">>)).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.
@@ -112,3 +151,56 @@ stop_servers({I, C}) ->
     catch gen_server:stop(C),
     catch gen_server:stop(I),
     ok.
+
+%%% Minimal in-process X.509 CA (realm CA -> org CA -> Ed25519 leaf
+%%% binding `LeafPub', O=`Org'). Returns the trusted realm CA PEM and the
+%%% leaf-first [leaf, org CA] PEM bundle a service embeds.
+issue_chain(LeafPub, Org) ->
+    {RealmPub, RealmPriv} = ca_key(),
+    {OrgPub, OrgPriv}     = ca_key(),
+    RealmSubj = subject(<<"io.macula">>, <<"io.macula">>),
+    OrgSubj   = subject(<<"io.macula.", Org/binary>>, Org),
+    LeafSubj  = subject(<<"mri:app:io.macula/", Org/binary, "/svc">>, Org),
+    RealmDer = sign_cert(RealmSubj, ed_spki(RealmPub), RealmSubj, RealmPriv, true),
+    OrgDer   = sign_cert(OrgSubj, ed_spki(OrgPub), RealmSubj, RealmPriv, true),
+    LeafDer  = sign_cert(LeafSubj, ed_spki(LeafPub), OrgSubj, OrgPriv, false),
+    #{realm_ca => pem([RealmDer]), chain => pem([LeafDer, OrgDer])}.
+
+ca_key() ->
+    {Pub, Priv} = crypto:generate_key(eddsa, ed25519),
+    {Pub, #'ECPrivateKey'{version = 1, privateKey = Priv,
+                          parameters = {namedCurve, ?'id-Ed25519'},
+                          publicKey = Pub}}.
+
+ed_spki(Pub) ->
+    #'OTPSubjectPublicKeyInfo'{
+       algorithm = #'PublicKeyAlgorithm'{algorithm = ?'id-Ed25519',
+                                         parameters = asn1_NOVALUE},
+       subjectPublicKey = #'ECPoint'{point = Pub}}.
+
+subject(CN, O) ->
+    {rdnSequence,
+     [[#'AttributeTypeAndValue'{type = {2, 5, 4, 3}, value = {utf8String, CN}}],
+      [#'AttributeTypeAndValue'{type = {2, 5, 4, 10}, value = {utf8String, O}}]]}.
+
+sign_cert(Subject, Spki, IssuerSubject, IssuerKey, IsCA) ->
+    TBS = #'OTPTBSCertificate'{
+             version = v3,
+             serialNumber = rand:uniform(1 bsl 60),
+             signature = #'SignatureAlgorithm'{algorithm = ?'id-Ed25519',
+                                               parameters = asn1_NOVALUE},
+             issuer = IssuerSubject,
+             validity = #'Validity'{notBefore = {utcTime, "230101000000Z"},
+                                    notAfter  = {utcTime, "330101000000Z"}},
+             subject = Subject,
+             subjectPublicKeyInfo = Spki,
+             extensions = [basic_constraints(IsCA)]},
+    public_key:pkix_sign(TBS, IssuerKey).
+
+basic_constraints(IsCA) ->
+    #'Extension'{extnID = ?'id-ce-basicConstraints', critical = true,
+                 extnValue = #'BasicConstraints'{cA = IsCA,
+                                                 pathLenConstraint = asn1_NOVALUE}}.
+
+pem(Ders) ->
+    public_key:pem_encode([{'Certificate', D, not_encrypted} || D <- Ders]).

@@ -28,8 +28,8 @@
 
 %% Pure helpers — the record-building and resolution logic, kept
 %% side-effect-free so it is unit-testable without a live mesh.
--export([procedure_uri/3, build_advertisement/5, decode_resolved/1,
-         station_url/2]).
+-export([procedure_uri/3, build_advertisement/5, build_advertisement/6,
+         decode_resolved/1, station_url/2]).
 
 %% Re-assert advertisements this often. Records outlive one interval;
 %% the tick also retries the initial write until the pool + a station
@@ -122,21 +122,29 @@ do_advertise(Caps) ->
                    hecate_om_identity:keypair(),
                    hecate_om_identity:realm(),
                    hecate_om_identity:org(),
+                   cert_chain_opts(hecate_om_identity:cert_chain()),
                    Caps).
 
-advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, Caps) ->
-    advertise_at(serving_station(Pool), Pool, KeyPair, Realm, Org, Caps);
+%% Embed the service cert chain when one is provisioned (Slice 7c
+%% Direction B); otherwise advertise without it (open-mode discovery).
+cert_chain_opts({ok, Pem})  -> #{cert_chain => Pem};
+cert_chain_opts({error, _}) -> #{}.
+
+advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, CertOpts, Caps) ->
+    advertise_at(serving_station(Pool), Pool, KeyPair, Realm, Org, CertOpts, Caps);
 %% Missing pool / keypair / realm: cannot reach the mesh or sign. No-op;
 %% the timer retries once all three are present.
-advertise_with(_Pool, _KeyPair, _Realm, _Org, _Caps) ->
+advertise_with(_Pool, _KeyPair, _Realm, _Org, _CertOpts, _Caps) ->
     ok.
 
-advertise_at({ok, Station}, Pool, KeyPair, Realm, Org, Caps) ->
+advertise_at({ok, Station}, Pool, KeyPair, Realm, Org, CertOpts, Caps) ->
     _ = [put_advertisement(Pool,
-                           build_advertisement(KeyPair, Realm, Org, Cap, Station))
+                           build_advertisement(KeyPair, Realm, Org, Cap, Station,
+                                               CertOpts))
          || Cap <- Caps],
     ok;
-advertise_at({error, no_station}, _Pool, _KeyPair, _Realm, _Org, _Caps) ->
+advertise_at({error, no_station}, _Pool, _KeyPair, _Realm, _Org, _CertOpts,
+             _Caps) ->
     ok.
 
 put_advertisement(Pool, Record) ->
@@ -183,6 +191,31 @@ resolve_at(Pool, Realm, Org, CapName) ->
 resolve_records({ok, Records}) -> decode_resolved(Records);
 resolve_records(_Other)        -> [].
 
+%% Like resolve_at/4 but keeps each raw record so the verifying-consumer
+%% path (7c Direction B) can chain-check the embedded service cert.
+resolve_full(Pool, Realm, Org, CapName) ->
+    Key = macula_record:procedure_key(procedure_uri(Realm, Org, CapName)),
+    resolve_full_records(find(Pool, Key)).
+
+resolve_full_records({ok, Records}) -> decode_resolved_full(Records);
+resolve_full_records(_Other)        -> [].
+
+decode_resolved_full(Records) ->
+    lists:filtermap(fun decode_one_full/1, Records).
+
+decode_one_full(Record) ->
+    decode_verified_full(macula_record:verify(Record), Record).
+
+decode_verified_full({ok, _Payload}, Record) ->
+    try macula_record:read_procedure_advertisement(Record) of
+        #{advertiser_node := Adv, serving_station := Sta} ->
+            {true, #{advertiser => Adv, serving_station => Sta, record => Record}}
+    catch _:_ ->
+        false
+    end;
+decode_verified_full({error, _}, _Record) ->
+    false.
+
 find(Pool, Key) ->
     try macula:find_records(Pool, Key)
     catch _:_ -> {error, unreachable}
@@ -198,42 +231,33 @@ call_capability_via(_Pool, _Realm, _Org, _CapName, _Payload, _TimeoutMs, _Opts) 
 
 %% @doc Explicit-pool form (testable without hecate_om_identity).
 %% `Opts': `verify => boolean()' (default false = open; when true, drop
-%% providers whose realm -> org -> server delegation chain does not
-%% verify, Slice 7c) and `ucan_token => binary()' (presented to a gated
-%% provider, Slice 7b).
+%% providers whose embedded service-cert chain does not verify to the
+%% realm CA, Slice 7c Direction B) and `ucan_token => binary()'
+%% (presented to a gated provider, Slice 7b).
 -spec call_capability(pid(), binary(), binary(), binary(), term(),
                       pos_integer(), map()) -> {ok, term()} | {error, term()}.
 call_capability(Pool, Realm, Org, CapName, Payload, TimeoutMs, Opts) ->
-    Providers = verify_providers(maps:get(verify, Opts, false),
-                                 Pool, Realm, Org,
-                                 resolve_at(Pool, Realm, Org, CapName)),
+    Providers = verify_providers(maps:get(verify, Opts, false), Org,
+                                 resolve_full(Pool, Realm, Org, CapName)),
     call_providers(Providers, Pool, Realm, CapName, Payload, TimeoutMs,
                    maps:get(ucan_token, Opts, <<>>)).
 
-%% Verifying-consumer mode (7c): keep only providers whose advertisement
-%% chains realm -> org -> server. Open mode (default): keep all.
-verify_providers(false, _Pool, _Realm, _Org, Providers) ->
+%% Verifying-consumer mode (7c Direction B): keep only providers whose
+%% embedded service-cert chain verifies to the realm CA and whose leaf
+%% is issued for `Org'. Open mode (default): keep all.
+verify_providers(false, _Org, Providers) ->
     Providers;
-verify_providers(true, Pool, Realm, Org, Providers) ->
-    [P || P <- Providers, chain_verifies(Pool, Realm, Org, P)].
+verify_providers(true, Org, Providers) ->
+    keep_chain_verified(hecate_om_identity:realm_ca(), Org, Providers).
 
-chain_verifies(Pool, Realm, Org, #{advertiser := Adv}) ->
-    with_org_directory(
-      find_record(Pool, macula_record:org_directory_key(Realm, Org)),
-      Pool, Realm, Adv).
-
-with_org_directory({ok, OrgDir}, Pool, Realm, Adv) ->
-    #{org_key := OrgKey} = macula_record:read_org_directory(OrgDir),
-    with_delegation(
-      find_record(Pool, macula_record:procedure_delegation_key(OrgKey, Adv)),
-      Realm, OrgDir, Adv);
-with_org_directory(_Miss, _Pool, _Realm, _Adv) ->
-    false.
-
-with_delegation({ok, Del}, Realm, OrgDir, Adv) ->
-    macula_record:verify_delegation_chain(Realm, OrgDir, Del, Adv) =:= ok;
-with_delegation(_Miss, _Realm, _OrgDir, _Adv) ->
-    false.
+%% `verify => true' but no realm CA provisioned: nothing can be verified,
+%% so drop every provider rather than trust blindly.
+keep_chain_verified({ok, RealmCaPem}, Org, Providers) ->
+    [P || #{record := Rec} = P <- Providers,
+          macula_record:verify_advertisement_cert_chain(RealmCaPem, Rec, Org)
+              =:= ok];
+keep_chain_verified({error, _}, _Org, _Providers) ->
+    [].
 
 call_providers([], _Pool, _Realm, _CapName, _Payload, _TimeoutMs, _Ucan) ->
     {error, no_provider};
@@ -308,10 +332,21 @@ add_brackets(_Found, Host)  -> <<"[", Host/binary, "]">>.
 -spec build_advertisement(macula_identity:key_pair(), binary(), binary(),
                           hecate_om_service:capability(),
                           macula_identity:pubkey()) -> map().
-build_advertisement(KeyPair, Realm, Org, #{name := Name}, Station) ->
+build_advertisement(KeyPair, Realm, Org, Cap, Station) ->
+    build_advertisement(KeyPair, Realm, Org, Cap, Station, #{}).
+
+%% `CertOpts' carries `cert_chain => Pem' (leaf ++ org CA) so a verifying
+%% consumer can chain the advertiser to the realm CA (Slice 7c Direction B);
+%% `#{}' when the service has no provisioned chain.
+-spec build_advertisement(macula_identity:key_pair(), binary(), binary(),
+                          hecate_om_service:capability(),
+                          macula_identity:pubkey(),
+                          macula_record:procedure_advertisement_opts()) -> map().
+build_advertisement(KeyPair, Realm, Org, #{name := Name}, Station, CertOpts) ->
     Advertiser = macula_identity:public(KeyPair),
     Uri        = procedure_uri(Realm, Org, Name),
-    Record     = macula_record:procedure_advertisement(Advertiser, Uri, Station),
+    Record     = macula_record:procedure_advertisement(Advertiser, Uri, Station,
+                                                       CertOpts),
     macula_record:sign(Record, KeyPair).
 
 %% Verify each record's signature and project it to

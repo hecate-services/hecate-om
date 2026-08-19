@@ -20,7 +20,7 @@
 -behaviour(gen_server).
 
 -export([start_link/0, service_cert/0, macula_client/0, realm/0, keypair/0,
-         org/0]).
+         org/0, cert_chain/0, realm_ca/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
@@ -38,7 +38,16 @@
     %% URIs, and the delegation-chain root below the realm). From the
     %% `org' app env; defaults to `<<"_">>' when unset. Direct-dial
     %% dual-trust (Slice 7c).
-    org       :: binary()
+    org       :: binary(),
+    %% Direct-dial dual-trust (Slice 7c Direction B). `org_ca' is the org
+    %% CA that issued this service's leaf cert; leaf ++ org CA is embedded
+    %% in advertisements so a consumer can chain to the realm CA. `realm_ca'
+    %% is the trust anchor a verifying consumer checks resolved
+    %% advertisements against. Both provisioned onto disk beside the leaf
+    %% cert; `undefined' when absent (service then advertises without a
+    %% chain / cannot run `verify => true').
+    org_ca    :: binary() | undefined,
+    realm_ca  :: binary() | undefined
 }).
 
 %% Retry cadence for (re)attaching the mesh pool.
@@ -69,6 +78,21 @@ keypair() ->
 org() ->
     gen_server:call(?MODULE, org).
 
+%% @doc The cert chain to embed in advertisements: this service's leaf
+%% cert followed by its org CA (PEM). `{error, no_cert_chain}' when
+%% either half is missing — the service then advertises without a chain
+%% and is reachable only by open-mode consumers (Slice 7c Direction B).
+-spec cert_chain() -> {ok, binary()} | {error, no_cert_chain}.
+cert_chain() ->
+    gen_server:call(?MODULE, cert_chain).
+
+%% @doc The realm CA a verifying consumer trusts as the direct-dial
+%% trust anchor (PEM). `{error, no_realm_ca}' when unconfigured — a
+%% `verify => true' call then cannot verify and drops every provider.
+-spec realm_ca() -> {ok, binary()} | {error, no_realm_ca}.
+realm_ca() ->
+    gen_server:call(?MODULE, realm_ca).
+
 init([]) ->
     Cert  = case load_cert() of
         {ok, C}    -> C;
@@ -84,7 +108,8 @@ init([]) ->
     %% and re-attaches if the pool later dies.
     self() ! connect,
     {ok, #state{cert = Cert, client = undefined, realm = Realm,
-                keypair = KeyPair, org = Org}}.
+                keypair = KeyPair, org = Org,
+                org_ca = load_org_ca(), realm_ca = load_realm_ca()}}.
 
 handle_call(service_cert, _From, #state{cert = undefined} = S) ->
     {reply, {error, no_cert}, S};
@@ -108,6 +133,17 @@ handle_call(keypair, _From, #state{keypair = Kp} = S) ->
 
 handle_call(org, _From, #state{org = Org} = S) ->
     {reply, Org, S};
+
+handle_call(cert_chain, _From, #state{cert = C, org_ca = O} = S)
+  when is_binary(C), is_binary(O) ->
+    {reply, {ok, <<C/binary, "\n", O/binary>>}, S};
+handle_call(cert_chain, _From, S) ->
+    {reply, {error, no_cert_chain}, S};
+
+handle_call(realm_ca, _From, #state{realm_ca = undefined} = S) ->
+    {reply, {error, no_realm_ca}, S};
+handle_call(realm_ca, _From, #state{realm_ca = RC} = S) ->
+    {reply, {ok, RC}, S};
 
 handle_call(_Msg, _From, S) ->
     {reply, {error, unknown_call}, S}.
@@ -143,6 +179,23 @@ load_cert() ->
     case file:read_file(Path) of
         {ok, Bin} -> {ok, Bin};
         Err       -> Err
+    end.
+
+%% Org CA and realm CA (Slice 7c Direction B), provisioned onto disk
+%% beside the leaf cert. Absent = `undefined' (advertise without a
+%% chain / no `verify => true').
+load_org_ca() ->
+    read_pem(application:get_env(hecate_om, org_ca_cert_path,
+                                 "/etc/hecate/secrets/org-ca.pem")).
+
+load_realm_ca() ->
+    read_pem(application:get_env(hecate_om, realm_ca_cert_path,
+                                 "/etc/hecate/secrets/realm-ca.pem")).
+
+read_pem(Path) ->
+    case file:read_file(Path) of
+        {ok, Bin} -> Bin;
+        _         -> undefined
     end.
 
 %% @doc Realm tag = 32-byte binary. v1: read from env (operator
