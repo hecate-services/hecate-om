@@ -3,6 +3,34 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.13.0] - 2026-08-19
+
+### Added
+
+- Slice 7c consumer side + org-namespaced addressing:
+  - Capabilities are addressed by `(realm, org, name)`: `procedure_uri/3` and the
+    advertisements carry the `<org>` segment. `hecate_om_identity:org/0` reads the
+    `org` app env (default `<<"_">>`).
+  - `hecate_om:call_capability/4` `(Org, CapName, Payload, Timeout)` and
+    `hecate_om_capabilities:call_capability/5` with `Opts`: `verify => true` drops
+    providers whose realm → org → server delegation chain does not verify (7c);
+    `ucan_token => Bin` presents a token to a gated provider (7b). Default is open
+    (no verify, no token).
+
+### Changed
+
+- Requires macula `~> 8.6`, which also FIXES capability publishing. SDK
+  `put_record` of a `procedure_advertisement` crashed the station's store handler
+  on wire-decoded records before macula 8.6.0 (it had only been exercised via
+  direct erpc puts). On this release publishing works end-to-end.
+
+### Note
+
+- The verifying-consumer path (`verify => true`) needs the realm and org to have
+  published `org_directory` / `procedure_delegation` records (realm/org
+  infrastructure, not the service). Until that exists, use the default open mode;
+  the verification mechanism is proven in macula-station's delegation e2e.
+
 ## [0.12.0] - 2026-08-19
 
 ### Added

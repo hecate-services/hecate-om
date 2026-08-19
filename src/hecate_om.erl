@@ -13,7 +13,7 @@
     boot/1,
     boot/2,
     advertise_capabilities/0,
-    call_capability/3,
+    call_capability/4,
     health/0,
     service_cert/0,
     macula_client/0,
@@ -110,10 +110,10 @@ advertise_capabilities() ->
 %% resolve a provider from the DHT, dial its serving station directly,
 %% and issue the CALL there (failing over to the next provider on
 %% error). The CALL uses `CapName' as the procedure, realm-scoped.
--spec call_capability(binary(), term(), pos_integer()) ->
+-spec call_capability(binary(), binary(), term(), pos_integer()) ->
     {ok, term()} | {error, term()}.
-call_capability(CapName, Payload, TimeoutMs) ->
-    hecate_om_capabilities:call_capability(CapName, Payload, TimeoutMs).
+call_capability(Org, CapName, Payload, TimeoutMs) ->
+    hecate_om_capabilities:call_capability(Org, CapName, Payload, TimeoutMs, #{}).
 
 %% @doc Snapshot of this service's health. Used by /health handler.
 -spec health() -> hecate_om_service:health().

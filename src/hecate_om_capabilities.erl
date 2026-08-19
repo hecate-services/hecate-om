@@ -23,12 +23,12 @@
 -behaviour(gen_server).
 
 -export([start_link/0, register/1, publish/0, lookup/1, list/0]).
--export([call_capability/3, call_capability/5]).
+-export([call_capability/5, call_capability/7]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 %% Pure helpers — the record-building and resolution logic, kept
 %% side-effect-free so it is unit-testable without a live mesh.
--export([procedure_uri/2, build_advertisement/4, decode_resolved/1,
+-export([procedure_uri/3, build_advertisement/5, decode_resolved/1,
          station_url/2]).
 
 %% Re-assert advertisements this often. Records outlive one interval;
@@ -69,13 +69,14 @@ lookup(CapName) when is_binary(CapName) ->
 %% `Realm'), matching how a provider serves it via `macula:advertise'.
 %% Runs in the caller's process (not the capabilities gen_server), so a
 %% slow mesh never blocks capability registration.
--spec call_capability(binary(), term(), pos_integer()) ->
+-spec call_capability(binary(), binary(), term(), pos_integer(), map()) ->
     {ok, term()} | {error, term()}.
-call_capability(CapName, Payload, TimeoutMs)
-  when is_binary(CapName), is_integer(TimeoutMs), TimeoutMs > 0 ->
+call_capability(Org, CapName, Payload, TimeoutMs, Opts)
+  when is_binary(Org), is_binary(CapName),
+       is_integer(TimeoutMs), TimeoutMs > 0, is_map(Opts) ->
     call_capability_via(hecate_om_identity:macula_client(),
                         hecate_om_identity:realm(),
-                        CapName, Payload, TimeoutMs).
+                        Org, CapName, Payload, TimeoutMs, Opts).
 
 list() ->
     gen_server:call(?MODULE, list).
@@ -120,21 +121,22 @@ do_advertise(Caps) ->
     advertise_with(hecate_om_identity:macula_client(),
                    hecate_om_identity:keypair(),
                    hecate_om_identity:realm(),
+                   hecate_om_identity:org(),
                    Caps).
 
-advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Caps) ->
-    advertise_at(serving_station(Pool), Pool, KeyPair, Realm, Caps);
+advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, Caps) ->
+    advertise_at(serving_station(Pool), Pool, KeyPair, Realm, Org, Caps);
 %% Missing pool / keypair / realm: cannot reach the mesh or sign. No-op;
 %% the timer retries once all three are present.
-advertise_with(_Pool, _KeyPair, _Realm, _Caps) ->
+advertise_with(_Pool, _KeyPair, _Realm, _Org, _Caps) ->
     ok.
 
-advertise_at({ok, Station}, Pool, KeyPair, Realm, Caps) ->
+advertise_at({ok, Station}, Pool, KeyPair, Realm, Org, Caps) ->
     _ = [put_advertisement(Pool,
-                           build_advertisement(KeyPair, Realm, Cap, Station))
+                           build_advertisement(KeyPair, Realm, Org, Cap, Station))
          || Cap <- Caps],
     ok;
-advertise_at({error, no_station}, _Pool, _KeyPair, _Realm, _Caps) ->
+advertise_at({error, no_station}, _Pool, _KeyPair, _Realm, _Org, _Caps) ->
     ok.
 
 put_advertisement(Pool, Record) ->
@@ -166,15 +168,16 @@ connected_node_ids(Pool) ->
 
 do_resolve(CapName) ->
     resolve_with(hecate_om_identity:macula_client(),
-                 hecate_om_identity:realm(), CapName).
+                 hecate_om_identity:realm(),
+                 hecate_om_identity:org(), CapName).
 
-resolve_with({ok, Pool}, {ok, Realm}, CapName) ->
-    resolve_at(Pool, Realm, CapName);
-resolve_with(_Pool, _Realm, _CapName) ->
+resolve_with({ok, Pool}, {ok, Realm}, Org, CapName) ->
+    resolve_at(Pool, Realm, Org, CapName);
+resolve_with(_Pool, _Realm, _Org, _CapName) ->
     [].
 
-resolve_at(Pool, Realm, CapName) ->
-    Key = macula_record:procedure_key(procedure_uri(Realm, CapName)),
+resolve_at(Pool, Realm, Org, CapName) ->
+    Key = macula_record:procedure_key(procedure_uri(Realm, Org, CapName)),
     resolve_records(find(Pool, Key)).
 
 resolve_records({ok, Records}) -> decode_resolved(Records);
@@ -185,40 +188,72 @@ find(Pool, Key) ->
     catch _:_ -> {error, unreachable}
     end.
 
-%%% Internals — call a capability (resolve -> dial -> call, with failover)
+%%% Internals — call a capability (resolve -> verify -> dial -> call)
 
-call_capability_via({ok, Pool}, {ok, Realm}, CapName, Payload, TimeoutMs) ->
-    call_capability(Pool, Realm, CapName, Payload, TimeoutMs);
-call_capability_via(_Pool, _Realm, _CapName, _Payload, _TimeoutMs) ->
+call_capability_via({ok, Pool}, {ok, Realm}, Org, CapName, Payload,
+                    TimeoutMs, Opts) ->
+    call_capability(Pool, Realm, Org, CapName, Payload, TimeoutMs, Opts);
+call_capability_via(_Pool, _Realm, _Org, _CapName, _Payload, _TimeoutMs, _Opts) ->
     {error, not_configured}.
 
-%% @doc Explicit-pool form (testable without hecate_om_identity): resolve
-%% providers, then dial + call each in turn until one answers.
--spec call_capability(pid(), binary(), binary(), term(), pos_integer()) ->
-    {ok, term()} | {error, term()}.
-call_capability(Pool, Realm, CapName, Payload, TimeoutMs) ->
-    call_providers(resolve_at(Pool, Realm, CapName),
-                   Pool, Realm, CapName, Payload, TimeoutMs).
+%% @doc Explicit-pool form (testable without hecate_om_identity).
+%% `Opts': `verify => boolean()' (default false = open; when true, drop
+%% providers whose realm -> org -> server delegation chain does not
+%% verify, Slice 7c) and `ucan_token => binary()' (presented to a gated
+%% provider, Slice 7b).
+-spec call_capability(pid(), binary(), binary(), binary(), term(),
+                      pos_integer(), map()) -> {ok, term()} | {error, term()}.
+call_capability(Pool, Realm, Org, CapName, Payload, TimeoutMs, Opts) ->
+    Providers = verify_providers(maps:get(verify, Opts, false),
+                                 Pool, Realm, Org,
+                                 resolve_at(Pool, Realm, Org, CapName)),
+    call_providers(Providers, Pool, Realm, CapName, Payload, TimeoutMs,
+                   maps:get(ucan_token, Opts, <<>>)).
 
-call_providers([], _Pool, _Realm, _CapName, _Payload, _TimeoutMs) ->
+%% Verifying-consumer mode (7c): keep only providers whose advertisement
+%% chains realm -> org -> server. Open mode (default): keep all.
+verify_providers(false, _Pool, _Realm, _Org, Providers) ->
+    Providers;
+verify_providers(true, Pool, Realm, Org, Providers) ->
+    [P || P <- Providers, chain_verifies(Pool, Realm, Org, P)].
+
+chain_verifies(Pool, Realm, Org, #{advertiser := Adv}) ->
+    with_org_directory(
+      find_record(Pool, macula_record:org_directory_key(Realm, Org)),
+      Pool, Realm, Adv).
+
+with_org_directory({ok, OrgDir}, Pool, Realm, Adv) ->
+    #{org_key := OrgKey} = macula_record:read_org_directory(OrgDir),
+    with_delegation(
+      find_record(Pool, macula_record:procedure_delegation_key(OrgKey, Adv)),
+      Realm, OrgDir, Adv);
+with_org_directory(_Miss, _Pool, _Realm, _Adv) ->
+    false.
+
+with_delegation({ok, Del}, Realm, OrgDir, Adv) ->
+    macula_record:verify_delegation_chain(Realm, OrgDir, Del, Adv) =:= ok;
+with_delegation(_Miss, _Realm, _OrgDir, _Adv) ->
+    false.
+
+call_providers([], _Pool, _Realm, _CapName, _Payload, _TimeoutMs, _Ucan) ->
     {error, no_provider};
 call_providers([#{serving_station := Station} | Rest],
-               Pool, Realm, CapName, Payload, TimeoutMs) ->
+               Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
     dial_provider(resolve_endpoint(Pool, Station),
-                  Rest, Pool, Realm, CapName, Payload, TimeoutMs).
+                  Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan).
 
 %% Endpoint resolved: dial + call; on error, fail over to the next.
-dial_provider({ok, Url}, Rest, Pool, Realm, CapName, Payload, TimeoutMs) ->
-    failover(macula:call_station(Pool, Url, Realm, CapName, Payload, TimeoutMs),
-             Rest, Pool, Realm, CapName, Payload, TimeoutMs);
-%% Endpoint unresolvable for this provider: skip to the next.
-dial_provider({error, _}, Rest, Pool, Realm, CapName, Payload, TimeoutMs) ->
-    call_providers(Rest, Pool, Realm, CapName, Payload, TimeoutMs).
+dial_provider({ok, Url}, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
+    failover(macula:call_station(Pool, Url, Realm, CapName, Payload, TimeoutMs,
+                                 #{ucan_token => Ucan}),
+             Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan);
+dial_provider({error, _}, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
+    call_providers(Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan).
 
-failover({ok, _} = Ok, _Rest, _Pool, _Realm, _CapName, _Payload, _TimeoutMs) ->
+failover({ok, _} = Ok, _R, _P, _Rlm, _Cap, _Pl, _Tmo, _Ucan) ->
     Ok;
-failover({error, _}, Rest, Pool, Realm, CapName, Payload, TimeoutMs) ->
-    call_providers(Rest, Pool, Realm, CapName, Payload, TimeoutMs).
+failover({error, _}, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
+    call_providers(Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan).
 
 %% Resolve a serving_station pubkey to a dialable `quic://' URL via its
 %% signed `station_endpoint' record.
@@ -248,11 +283,15 @@ endpoint_url(_Other) ->
 %% Realm-namespaced procedure URI. The org segment (Q8) rides with
 %% Slice 7 trust; realm-scoping is enough for discovery and
 %% cross-realm collision-freedom now.
--spec procedure_uri(binary(), binary() | map()) -> binary().
-procedure_uri(Realm, #{name := Name}) ->
-    procedure_uri(Realm, Name);
-procedure_uri(Realm, Name) when is_binary(Realm), is_binary(Name) ->
-    <<(binary:encode_hex(Realm))/binary, "/", Name/binary>>.
+%% `<realm-hex>/<org>/<capability>' — the org segment (Slice 7c) roots
+%% the delegation chain and keeps two orgs' same-named capabilities
+%% distinct.
+-spec procedure_uri(binary(), binary(), binary() | map()) -> binary().
+procedure_uri(Realm, Org, #{name := Name}) ->
+    procedure_uri(Realm, Org, Name);
+procedure_uri(Realm, Org, Name)
+  when is_binary(Realm), is_binary(Org), is_binary(Name) ->
+    <<(binary:encode_hex(Realm))/binary, "/", Org/binary, "/", Name/binary>>.
 
 %% Build the `quic://' seed URL a pool dials, bracketing IPv6 hosts.
 -spec station_url(binary(), 1..65535) -> binary().
@@ -266,12 +305,12 @@ bracket_if_ipv6(Host) ->
 add_brackets(nomatch, Host) -> Host;
 add_brackets(_Found, Host)  -> <<"[", Host/binary, "]">>.
 
--spec build_advertisement(macula_identity:key_pair(), binary(),
+-spec build_advertisement(macula_identity:key_pair(), binary(), binary(),
                           hecate_om_service:capability(),
                           macula_identity:pubkey()) -> map().
-build_advertisement(KeyPair, Realm, #{name := Name}, Station) ->
+build_advertisement(KeyPair, Realm, Org, #{name := Name}, Station) ->
     Advertiser = macula_identity:public(KeyPair),
-    Uri        = procedure_uri(Realm, Name),
+    Uri        = procedure_uri(Realm, Org, Name),
     Record     = macula_record:procedure_advertisement(Advertiser, Uri, Station),
     macula_record:sign(Record, KeyPair).
 

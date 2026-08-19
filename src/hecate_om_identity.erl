@@ -19,7 +19,8 @@
 -module(hecate_om_identity).
 -behaviour(gen_server).
 
--export([start_link/0, service_cert/0, macula_client/0, realm/0, keypair/0]).
+-export([start_link/0, service_cert/0, macula_client/0, realm/0, keypair/0,
+         org/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
 -record(state, {
@@ -32,7 +33,12 @@
     %% ephemeral SDK identity — such a service peers and calls fine but
     %% cannot sign records, so it is (correctly) invisible to DHT
     %% discovery.
-    keypair   :: macula_identity:key_pair() | undefined
+    keypair   :: macula_identity:key_pair() | undefined,
+    %% This service's org name (the `<org>' segment of its procedure
+    %% URIs, and the delegation-chain root below the realm). From the
+    %% `org' app env; defaults to `<<"_">>' when unset. Direct-dial
+    %% dual-trust (Slice 7c).
+    org       :: binary()
 }).
 
 %% Retry cadence for (re)attaching the mesh pool.
@@ -57,6 +63,12 @@ realm() ->
 keypair() ->
     gen_server:call(?MODULE, keypair).
 
+%% @doc This service's org name (the `<org>' segment of its procedure
+%% URIs). Always a binary; `<<"_">>' when unconfigured.
+-spec org() -> binary().
+org() ->
+    gen_server:call(?MODULE, org).
+
 init([]) ->
     Cert  = case load_cert() of
         {ok, C}    -> C;
@@ -64,6 +76,7 @@ init([]) ->
     end,
     Realm   = load_realm(),
     KeyPair = load_keypair(),
+    Org     = load_org(),
     %% Connect off the init path and retry. At boot hecate_om may start
     %% before the macula SDK app is fully up, so a single inline connect
     %% races it and loses (the bug that kept services dark even with seeds).
@@ -71,7 +84,7 @@ init([]) ->
     %% and re-attaches if the pool later dies.
     self() ! connect,
     {ok, #state{cert = Cert, client = undefined, realm = Realm,
-                keypair = KeyPair}}.
+                keypair = KeyPair, org = Org}}.
 
 handle_call(service_cert, _From, #state{cert = undefined} = S) ->
     {reply, {error, no_cert}, S};
@@ -92,6 +105,9 @@ handle_call(keypair, _From, #state{keypair = undefined} = S) ->
     {reply, {error, no_keypair}, S};
 handle_call(keypair, _From, #state{keypair = Kp} = S) ->
     {reply, {ok, Kp}, S};
+
+handle_call(org, _From, #state{org = Org} = S) ->
+    {reply, Org, S};
 
 handle_call(_Msg, _From, S) ->
     {reply, {error, unknown_call}, S}.
@@ -187,6 +203,14 @@ loaded_keypair({error, _}) -> undefined.
 
 keypair_opts(undefined) -> #{};
 keypair_opts(KeyPair)   -> #{identity => KeyPair}.
+
+%% Org name from the `org' app env; `<<"_">>' when unset (records still
+%% resolve, just under the placeholder org until one is configured).
+load_org() ->
+    case application:get_env(hecate_om, org) of
+        {ok, O} when is_binary(O), O =/= <<>> -> O;
+        _                                     -> <<"_">>
+    end.
 
 %% Station seeds, in precedence order:
 %%   1. MACULA_STATION_SEEDS env var (comma-separated URLs) — lets each
