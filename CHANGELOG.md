@@ -3,6 +3,28 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.12.0] - 2026-08-19
+
+### Added
+
+- `hecate_om:call_capability/3` — call a capability by name over the direct-dial
+  data path: resolve a provider from the DHT (`procedure_advertisement`), resolve
+  its serving station to a dialable endpoint (`station_endpoint`), dial it directly
+  and CALL the raw `CapName` there, failing over to the next provider on error.
+
+### Fixed
+
+- Capability RESOLUTION now works over the real SDK path. On macula 8.2.0-8.4.0 a
+  consumer resolving via `find_records/2` got `undefined` fields (the record
+  readers did not handle the atomised payload keys the SDK path returns), so
+  discovery silently returned no usable providers. macula 8.4.1 fixes the readers.
+
+### Changed
+
+- Requires macula `~> 8.4` (was `~> 8.2`): `call_station` + `station_endpoint`
+  readers (8.3.0), TLS-policy forwarding (8.4.0), and the reader atom-key fix
+  (8.4.1).
+
 ## [0.11.0] - 2026-08-19
 
 ### Changed
