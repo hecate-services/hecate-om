@@ -17,6 +17,9 @@
     health/0,
     service_cert/0,
     macula_client/0,
+    realm/0,
+    keypair/0,
+    mesh_handles/0,
     service_module/0
 ]).
 
@@ -127,3 +130,35 @@ service_cert() ->
 -spec macula_client() -> {ok, term()} | {error, term()}.
 macula_client() ->
     hecate_om_identity:macula_client().
+
+%% @doc This service's realm tag (32-byte binary). Previously reachable
+%% only by calling `hecate_om_identity:realm/0' directly, past the public
+%% facade -- every service wanting to publish/subscribe/advertise on the
+%% mesh needs this alongside `macula_client/0', so it belongs here.
+-spec realm() -> {ok, binary()} | {error, term()}.
+realm() ->
+    hecate_om_identity:realm().
+
+%% @doc This service's stable signing keypair, or `{error, no_keypair}'
+%% when running on an ephemeral identity. Needed by every direct-dial
+%% PROVIDER desk (`macula_response:advertise_direct/6,7',
+%% `macula_streamer:advertise_direct/6,7', ...), which sign their own DHT
+%% advertisement record with it.
+-spec keypair() -> {ok, macula_identity:key_pair()} | {error, term()}.
+keypair() ->
+    hecate_om_identity:keypair().
+
+%% @doc The `{Pool, Realm}' pair every PubSub/RPC-consumer/Content call
+%% needs together. Replaces the hand-rolled
+%% `case {macula_client(), realm()} of {{ok,P},{ok,R}} -> ...' pairing
+%% four independent hecate-services repos each wrote for themselves
+%% (`hecate_mesh.erl', `tom_ocean_mesh.erl', `tom_wire_macula.erl',
+%% `tom_crier.erl') because hecate_om gave them nothing to build on.
+%% Degrades to `{error, mesh_unavailable}' rather than crashing when
+%% either half is missing (mesh unreachable, or no client attached yet).
+-spec mesh_handles() -> {ok, term(), binary()} | {error, mesh_unavailable}.
+mesh_handles() ->
+    handles(macula_client(), realm()).
+
+handles({ok, Pool}, {ok, Realm}) -> {ok, Pool, Realm};
+handles(_MaculaClient, _Realm) -> {error, mesh_unavailable}.
