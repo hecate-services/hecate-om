@@ -3,10 +3,30 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
-## [0.14.0] - 2026-08-19
+## [0.14.0] - 2026-08-22
+
+### Added
+
+- `hecate_om:mesh_handles/0` — the shared `{Pool, Realm}` fetch every
+  PubSub/RPC-consumer/Content call needs together, replacing the hand-rolled
+  `case {macula_client(), realm()} of {{ok,P},{ok,R}} -> ...` pairing four
+  independent hecate-services repos each wrote for themselves because
+  hecate_om gave them nothing to build on.
+- `hecate_om:realm/0` and `hecate_om:keypair/0` — re-exported on the public
+  facade. Both already existed on `hecate_om_identity`; a service previously
+  had to reach past the facade to get them. `keypair/0` is needed by every
+  direct-dial PROVIDER desk (`macula_response:advertise_direct/6,7`,
+  `macula_streamer:advertise_direct/6,7`, ...), which sign their own DHT
+  advertisement record with it.
 
 ### Changed
 
+- Bumped macula dependency `~> 9.0` → `~> 10.0`. macula 10.0.0 removed the
+  dormant macula-net L3 substrate; grepped `src/`/`include/` first —
+  hecate-om never called any of it. Verified against a genuine fresh fetch
+  off hex (not a local checkout): clean compile, 13/13 eunit.
+- Bumped macula dependency to `~> 9.0`, pulling in direct-dial across all
+  four SDK primitive pairs (RPC/PubSub/Content/Streaming).
 - Slice 7c verify switched to **Direction B** (managed-realm X.509 cert chain),
   replacing the Ed25519 delegation-record chain that could never go live (the realm
   tag is a keyless `SHA-256(name)` and the realm holds no signing key). Requires
@@ -22,6 +42,12 @@ Versioning: [SemVer](https://semver.org/).
   - `hecate_om_identity` loads the org CA (`org_ca_cert_path`, default
     `/etc/hecate/secrets/org-ca.pem`) and realm CA (`realm_ca_cert_path`, default
     `/etc/hecate/secrets/realm-ca.pem`); exposes `cert_chain/0` and `realm_ca/0`.
+
+### Fixed
+
+- `priv/templates/hecate_service/rebar.config` pinned `{hecate_om, "~> 0.8"}`,
+  six major versions stale — every service scaffolded via `rebar3 new
+  hecate_service` inherited it. Now `~> 0.13`.
 
 ## [0.13.0] - 2026-08-19
 

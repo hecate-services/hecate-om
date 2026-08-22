@@ -250,12 +250,14 @@ networking makes a collision a silent bind failure.
 
 ## Status
 
-**Working library — v0.9.0.** The behaviour and all helpers are implemented
+**Working library — v0.14.0.** The behaviour and all helpers are implemented
 (`hecate_om_identity`, `hecate_om_capabilities`, `hecate_om_store`,
 `hecate_om_health`), the boot path (`hecate_om:boot/1` with auto store-wiring)
 is exercised by a Common Test suite (`hecate_om_SUITE`), and `rebar3 new
 hecate_service` generates a service that compiles, tests and deploys, guarded
-by a suite that generates one for real.
+by a suite that generates one for real. `hecate_om:mesh_handles/0` gives every
+service the shared `{Pool, Realm}` pair its own PubSub/RPC/Content code needs,
+alongside `realm/0` and `keypair/0` on the same public facade.
 
 The behaviour surface has grown since the first cut: the store-wiring
 callbacks are `store_id/0` + `data_dir/0` (required together) plus optional
