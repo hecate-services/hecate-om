@@ -22,6 +22,9 @@
 -export([start_link/0, service_cert/0, macula_client/0, realm/0, keypair/0,
          org/0, cert_chain/0, realm_ca/0]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
+%% Exported for hecate_om_identity_tests.erl -- pure resolution logic,
+%% same testing convention hecate_om_capabilities.erl already uses.
+-export([keypair_from/1]).
 
 -record(state, {
     cert      :: binary() | undefined,
@@ -238,21 +241,43 @@ connect_seeds(Seeds, KeyPair) ->
     end.
 
 %% Load the stable on-disk service keypair (macula-native format, via
-%% `macula_identity:save/2') when `identity_key_path' is configured +
-%% loadable; otherwise `undefined' and the SDK auto-generates an ephemeral
-%% identity at connect. The keypair is for peering AND for signing the
-%% service's own DHT records — an ephemeral service peers and calls fine
-%% but cannot advertise procedure records.
+%% `macula_identity:save/2') when `identity_key_path' is configured;
+%% `undefined' (the SDK auto-generates an ephemeral identity at
+%% connect) only when `identity_key_path' itself is unconfigured. The
+%% keypair is for peering AND for signing the service's own DHT
+%% records — an ephemeral service peers and calls fine but cannot
+%% advertise procedure records, so a service whose whole job is a
+%% direct-dial RPC/Streaming *provider* silently never advertises
+%% anything if this stays unset — confirmed live, not theoretical
+%% (hecate-tube's `tube_mesh_providers' retried forever, `keypair/0'
+%% never resolving, until this existed).
+%%
+%% Self-heals rather than requiring out-of-band provisioning: any load
+%% failure (missing file — the common case, first boot — or a corrupt
+%% one) generates a fresh keypair and persists it to the configured
+%% path via `macula_identity:save/2', which `ensure_dir's the path
+%% itself. Same pattern macula-realm's own mesh identity already
+%% uses. Falls back to `undefined' only if the save itself fails
+%% (e.g. a read-only filesystem).
 load_keypair() ->
     keypair_from(application:get_env(hecate_om, identity_key_path)).
 
 keypair_from({ok, Path}) ->
-    loaded_keypair(macula_identity:load(Path));
+    loaded_or_generated(macula_identity:load(Path), Path);
 keypair_from(undefined) ->
     undefined.
 
-loaded_keypair({ok, Kp})   -> Kp;
-loaded_keypair({error, _}) -> undefined.
+loaded_or_generated({ok, Kp}, _Path) ->
+    Kp;
+loaded_or_generated({error, _Reason}, Path) ->
+    generate_and_save(Path).
+
+generate_and_save(Path) ->
+    KeyPair = macula_identity:generate(),
+    save_result(macula_identity:save(Path, KeyPair), KeyPair).
+
+save_result(ok, KeyPair) -> KeyPair;
+save_result({error, _Reason}, _KeyPair) -> undefined.
 
 keypair_opts(undefined) -> #{};
 keypair_opts(KeyPair)   -> #{identity => KeyPair}.

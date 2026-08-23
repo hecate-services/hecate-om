@@ -250,7 +250,7 @@ networking makes a collision a silent bind failure.
 
 ## Status
 
-**Working library — v0.14.0.** The behaviour and all helpers are implemented
+**Working library — v0.14.1.** The behaviour and all helpers are implemented
 (`hecate_om_identity`, `hecate_om_capabilities`, `hecate_om_store`,
 `hecate_om_health`), the boot path (`hecate_om:boot/1` with auto store-wiring)
 is exercised by a Common Test suite (`hecate_om_SUITE`), and `rebar3 new

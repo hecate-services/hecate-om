@@ -3,6 +3,34 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.14.1] - 2026-08-23
+
+### Fixed
+
+- `hecate_om_identity`'s stable keypair now self-heals instead of silently
+  staying unconfigured. `load_keypair/0` previously only ever *loaded* from
+  `identity_key_path` — a service deployed with the env pointed at a path
+  with nothing there yet (the common case: nobody's provisioned it
+  out-of-band) got `keypair() -> {error, no_keypair}` forever, every single
+  boot, with no error logged anywhere. Confirmed live on hecate-tube: its
+  `tube_mesh_providers` retries advertising `tube.watch_video_clip` /
+  `tube.lookup_channel` / `tube.lookup_video_clip` every 5s pending both
+  `mesh_handles/0` and `keypair/0` — `mesh_handles/0` resolved fine (the
+  service peers and calls just fine on an ephemeral identity), `keypair/0`
+  never did, so the service silently never advertised any of its three
+  direct-dial providers, ever, since its first deployment. No amount of
+  local testing catches this — it only surfaces against a real deployment
+  that actually tries to be *called*, not just to call out.
+
+  Now: any load failure (missing file — the common case — or a corrupt
+  one) generates a fresh keypair via `macula_identity:generate/0` and
+  persists it to the configured path via `macula_identity:save/2` (which
+  `ensure_dir`s it), same self-provisioning pattern macula-realm's own mesh
+  identity already uses. Falls back to `undefined` (ephemeral, prior
+  behavior) only if the save itself fails, e.g. a read-only filesystem.
+  `identity_key_path` left unconfigured is unaffected — still ephemeral by
+  design, unchanged.
+
 ## [0.14.0] - 2026-08-22
 
 ### Added
