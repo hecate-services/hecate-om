@@ -3,6 +3,22 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.14.2] - 2026-08-23
+
+### Fixed
+
+- Self-healed keypairs are now puzzle-hardened (`macula_identity:generate(#{puzzle => true})`),
+  mirroring macula-realm's own mesh identity. Every station in this fleet
+  enforces S/Kademlia puzzle validation on CONNECT/HELLO; a plain identity's
+  handshake completes and is then closed with `puzzle_invalid` — a graceful
+  drain, then `drained` — on every single connection, forever. Confirmed
+  live: this is the full explanation for why `tube_mesh_providers` could
+  report `advertised => true` (its own local, client-side bookkeeping)
+  while no station's DHT-facing advertise registry ever actually held the
+  advertisement — a ~96-second reject/reconnect loop, invisible until the
+  underlying station logged its disconnect reason at all (a separate fix,
+  `macula-station` `4188a1d`).
+
 ## [0.14.1] - 2026-08-23
 
 ### Fixed

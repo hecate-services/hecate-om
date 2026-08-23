@@ -28,6 +28,10 @@ first_boot_generates_and_persists_a_keypair_test() ->
     %% and it's genuinely loadable back via the same path macula_identity
     %% itself would use -- not just "a file exists".
     ?assertEqual({ok, KeyPair}, macula_identity:load(Path)),
+    %% Regression: a non-puzzle-hardened identity's handshake gets
+    %% closed with puzzle_invalid by every station in this fleet,
+    %% forever -- confirmed live, see generate_and_save/1's own comment.
+    ?assert(macula_identity:puzzle_valid(macula_identity:public(KeyPair))),
     file:delete(Path).
 
 existing_keypair_is_loaded_not_regenerated_test() ->
@@ -49,4 +53,5 @@ corrupt_keypair_file_self_heals_test() ->
 
     ?assertMatch(#{public := _, private := _}, KeyPair),
     ?assertEqual({ok, KeyPair}, macula_identity:load(Path)),
+    ?assert(macula_identity:puzzle_valid(macula_identity:public(KeyPair))),
     file:delete(Path).

@@ -272,8 +272,19 @@ loaded_or_generated({ok, Kp}, _Path) ->
 loaded_or_generated({error, _Reason}, Path) ->
     generate_and_save(Path).
 
+%% Puzzle-hardened (mirrors macula-realm's own mesh identity, see
+%% MaculaRealm.Mesh.mesh_identity/0): every station in this fleet
+%% enforces S/Kademlia puzzle validation on CONNECT/HELLO. A plain
+%% (non-puzzle) identity's handshake completes and then gets closed
+%% with `puzzle_invalid' -> a graceful drain -> `drained', every
+%% single connection, forever -- confirmed live: this is why
+%% tube_mesh_providers could reach `advertised => true' (the local,
+%% client-side bookkeeping) while no station's DHT-facing registry
+%% ever actually held the advertisement, on a repeating ~96s
+%% reject/reconnect cycle. Grinding difficulty 8 is sub-millisecond;
+%% there's no reason to skip it.
 generate_and_save(Path) ->
-    KeyPair = macula_identity:generate(),
+    KeyPair = macula_identity:generate(#{puzzle => true}),
     save_result(macula_identity:save(Path, KeyPair), KeyPair).
 
 save_result(ok, KeyPair) -> KeyPair;
