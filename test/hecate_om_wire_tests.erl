@@ -1,7 +1,7 @@
-%%% Unit tests for hecate_om_wire:field/2,3 — pure map lookup, no mesh
-%%% involved, same convention as hecate_om_capabilities.erl/hecate_om_
-%%% pubsub.erl's own exported pure helpers (PLAN_HECATE_OM_MESH_
-%%% WRAPPERS.md, piece F).
+%%% Unit tests for hecate_om_wire:field/2,3 and retryable/1 — pure
+%%% logic, no mesh involved, same convention as hecate_om_capabilities.
+%%% erl/hecate_om_pubsub.erl's own exported pure helpers
+%%% (PLAN_HECATE_OM_MESH_WRAPPERS.md, pieces F and G).
 -module(hecate_om_wire_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -49,3 +49,40 @@ binary_key_with_no_existing_atom_form_does_not_raise_test() ->
     Payload = #{NoAtomForm => <<"still findable via the binary form">>},
     ?assertEqual(<<"still findable via the binary form">>,
                  hecate_om_wire:field(NoAtomForm, Payload)).
+
+%%% retryable/1 (piece G) -- real BOLT#4 codes from macula_bolt4:table/0,
+%%% not fabricated ones, so a real table edit is what would break these.
+
+retryable_is_false_on_success_test() ->
+    ?assertEqual(false, hecate_om_wire:retryable({ok, #{}})).
+
+%% 16#02 temporary_relay_failure, retry => same_path_after_backoff.
+retryable_true_for_a_backoff_coded_failure_test() ->
+    ?assertEqual(true, hecate_om_wire:retryable(
+                          {error, {call_error, 16#02, temporary_relay_failure}})).
+
+%% 16#05 target_realm_refused, retry => application (handler-level
+%% remedy, not a transport retry).
+retryable_false_for_an_application_coded_failure_test() ->
+    ?assertEqual(false, hecate_om_wire:retryable(
+                           {error, {call_error, 16#05, target_realm_refused}})).
+
+%% 16#0A crypto_puzzle_invalid, retry => crypto_drop -- security-
+%% critical, must never be retried automatically.
+retryable_false_for_a_crypto_drop_coded_failure_test() ->
+    ?assertEqual(false, hecate_om_wire:retryable(
+                           {error, {call_error, 16#0A, crypto_puzzle_invalid}})).
+
+%% macula_bolt4:is_retryable/1 raises for a code its own table doesn't
+%% recognize (a real possibility across a protocol version skew, not a
+%% fabricated edge case) -- must resolve to retryable, not crash the
+%% caller over a code this build doesn't know yet.
+retryable_true_for_an_unrecognized_bolt4_code_test() ->
+    ?assertEqual(true, hecate_om_wire:retryable(
+                          {error, {call_error, 16#FE, some_future_code}})).
+
+%% An error macula didn't code-classify at all (a raw catch, a
+%% timeout) -- nothing for the BOLT#4 table to say, decided directly.
+retryable_true_for_an_unclassified_error_test() ->
+    ?assertEqual(true, hecate_om_wire:retryable({error, timeout})),
+    ?assertEqual(true, hecate_om_wire:retryable({'EXIT', some_reason})).
