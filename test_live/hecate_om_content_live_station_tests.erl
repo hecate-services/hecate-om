@@ -12,8 +12,11 @@
 %% pooled path was used, not an assertion about which internal
 %% function got called.
 %%
-%% Runs as part of the default `rebar3 eunit', same tradeoff as the
-%% other live station tests in this repo.
+%% Lives in test_live/, NOT test/ -- excluded from the default
+%% `rebar3 eunit' and CI's main gate on purpose; see
+%% hecate_om_capabilities_live_station_tests's moduledoc for why. Run
+%% explicitly:
+%%   rebar3 as live_test eunit --dir test_live
 -module(hecate_om_content_live_station_tests).
 -include_lib("eunit/include/eunit.hrl").
 

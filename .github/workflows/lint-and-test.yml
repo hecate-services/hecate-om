@@ -1,11 +1,14 @@
-# Structural lint and the Common Test suites.
+# Structural lint, EUnit, and the Common Test suites.
 #
 # THE TEMPLATE SUITE IS THE REASON THIS EXISTS. hecate_om ships the scaffold
 # every other service is generated from, and the previous templates drifted for
 # months precisely because nothing ran them: they emitted a Quadlet unit nothing
 # on the fleet uses, TODOs in place of callbacks, and an identity_spec claiming
 # authority the generated service could not exercise. A guard nobody runs is not
-# a guard.
+# a guard. `rebar3 eunit` joined this job for the same reason, 2026-08-24: the
+# mesh-wrappers pieces (hecate_om_capabilities/_pubsub/_content) shipped with
+# real test coverage that nothing was running -- CI only ever called `rebar3 ct`,
+# so a regression in any of it would have stayed green.
 #
 # Runs on the glibc erlang image, where macula resolves a prebuilt QUIC NIF and
 # no Rust toolchain is needed.
@@ -26,6 +29,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rebar3 lint
+      - run: rebar3 eunit
       # hecate_service_template_SUITE shells out to `rebar3 new', so rebar3 must
       # be on PATH inside the container. The erlang image ships it.
       - run: rebar3 ct
+
+  # test_live/*.erl hit a real demo-fleet station (station-de-frankfurt.macula.io)
+  # over the network -- genuinely valuable (they've caught three real bugs no
+  # unit test could have), but the demo fleet is documented, disposable dev
+  # infra with no uptime guarantee, so this job must never block a merge on a
+  # station blip. continue-on-error surfaces a failure (this job goes yellow,
+  # visible in the run) without turning the check red. See rebar.config's
+  # `live_test` profile and any test_live/*.erl moduledoc for the full reasoning.
+  live-mesh-tests:
+    runs-on: ubuntu-latest
+    container:
+      image: erlang:27
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - run: rebar3 as live_test eunit --dir test_live

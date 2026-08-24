@@ -26,15 +26,13 @@
 %%      exactly: `verify => none, pin_tls_cert => false,
 %%      expected_node_id => Station'.
 %%
-%% Runs as part of the default `rebar3 eunit' (rebar3 has no built-in
-%% way to exclude one test/*.erl module from discovery without moving
-%% it out of test/ entirely) -- it's fast (~1s against a responsive
-%% station) and this repo already treats the demo fleet as safe,
-%% disposable dev infra, so that's an acceptable tradeoff for now, not
-%% an oversight. If this becomes flaky in CI (the demo fleet is not
-%% guaranteed uptime), move it to a separate directory + eunit profile
-%% rather than deleting the coverage. Run just this module directly:
-%%   rebar3 eunit --module=hecate_om_capabilities_live_station_tests
+%% Lives in test_live/, NOT test/ -- excluded from the default
+%% `rebar3 eunit' (and CI's main gate) on purpose: the demo fleet is
+%% documented, disposable dev infra with no uptime guarantee, so a
+%% station blip must never block an unrelated PR. Run explicitly:
+%%   rebar3 as live_test eunit --dir test_live
+%% or, for just this module:
+%%   rebar3 as live_test eunit --dir test_live --module=hecate_om_capabilities_live_station_tests
 -module(hecate_om_capabilities_live_station_tests).
 -include_lib("eunit/include/eunit.hrl").
 

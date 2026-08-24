@@ -7,9 +7,11 @@
 %% removed one, touching nothing else (the supervision-membership
 %% design for a `federation_inbox'-shaped dynamic topic set).
 %%
-%% Runs as part of the default `rebar3 eunit', same tradeoff as
-%% `hecate_om_capabilities_live_station_tests.erl' -- see that file's
-%% moduledoc.
+%% Lives in test_live/, NOT test/ -- excluded from the default
+%% `rebar3 eunit' and CI's main gate on purpose; see
+%% `hecate_om_capabilities_live_station_tests.erl''s moduledoc for why.
+%% Run explicitly:
+%%   rebar3 as live_test eunit --dir test_live
 -module(hecate_om_pubsub_subscriptions_live_tests).
 -include_lib("eunit/include/eunit.hrl").
 
