@@ -55,3 +55,52 @@ corrupt_keypair_file_self_heals_test() ->
     ?assertEqual({ok, KeyPair}, macula_identity:load(Path)),
     ?assert(macula_identity:puzzle_valid(macula_identity:public(KeyPair))),
     file:delete(Path).
+
+%% hecate_om_identity:configured_seeds/0 -- exported for hecate_om_sup's
+%% own use deciding whether the mesh pool child (piece A,
+%% PLAN_HECATE_OM_MESH_WRAPPERS.md) belongs in the children list at
+%% all, which makes a wrong answer here higher-stakes than before this
+%% piece: it used to only pick which seeds a connect attempt used, now
+%% it decides whether a pool is started at all.
+configured_seeds_test_() ->
+    {setup, fun clear_seed_config/0, fun restore_seed_config/1,
+     fun(_) ->
+         [
+          ?_assertEqual([], with_seed_config(false, undefined, fun hecate_om_identity:configured_seeds/0)),
+          ?_assertEqual([<<"https://a:1">>, <<"https://b:2">>],
+                        with_seed_config(false, [<<"https://a:1">>, <<"https://b:2">>],
+                                          fun hecate_om_identity:configured_seeds/0)),
+          ?_assertEqual([<<"https://env:9">>],
+                        with_seed_config("https://env:9", [<<"https://appenv:1">>],
+                                          fun hecate_om_identity:configured_seeds/0)),
+          ?_assertEqual([<<"https://a:1">>, <<"https://b:2">>],
+                        with_seed_config(" https://a:1 , https://b:2 ,, ", undefined,
+                                          fun hecate_om_identity:configured_seeds/0))
+         ]
+     end}.
+
+clear_seed_config() ->
+    {os:getenv("MACULA_STATION_SEEDS"), application:get_env(hecate_om, station_seeds)}.
+
+restore_seed_config({Env, AppEnv}) ->
+    restore_env(Env),
+    restore_app_env(AppEnv).
+
+restore_env(false) -> os:unsetenv("MACULA_STATION_SEEDS");
+restore_env(Val)   -> os:putenv("MACULA_STATION_SEEDS", Val).
+
+restore_app_env(undefined)  -> application:unset_env(hecate_om, station_seeds);
+restore_app_env({ok, Seeds}) -> application:set_env(hecate_om, station_seeds, Seeds).
+
+%% EnvVal: string to putenv, or `false' to unsetenv. AppEnvSeeds:
+%% seed list to set as app env, or `undefined' to unset.
+with_seed_config(EnvVal, AppEnvSeeds, Fun) ->
+    set_env(EnvVal),
+    set_app_env(AppEnvSeeds),
+    Fun().
+
+set_env(false)  -> os:unsetenv("MACULA_STATION_SEEDS");
+set_env(EnvVal) -> os:putenv("MACULA_STATION_SEEDS", EnvVal).
+
+set_app_env(undefined) -> application:unset_env(hecate_om, station_seeds);
+set_app_env(Seeds)     -> application:set_env(hecate_om, station_seeds, Seeds).

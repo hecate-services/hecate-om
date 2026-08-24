@@ -1,6 +1,6 @@
-%%% @doc Loads the service-principal cert at boot and a Macula SDK
-%%% client handle. Held in a gen_server so every other process can
-%%% borrow the pool through `hecate_om:macula_client/0'.
+%%% @doc Loads the service-principal cert at boot; identity + seed/opts
+%%% resolution for the mesh pool `hecate_om_sup' supervises alongside
+%%% this gen_server (piece A, `PLAN_HECATE_OM_MESH_WRAPPERS.md').
 %%%
 %%% Each hecate-service has its OWN realm-signed credential (NOT a
 %%% user's). The credential lives at /etc/hecate/secrets/service-cert.pem
@@ -12,10 +12,34 @@
 %%% realm HTTP endpoint. The v2 swap-in lands here without touching
 %%% consumers.
 %%%
-%%% Connect-degradation: when seeds aren't reachable (early boot,
-%%% test harness, no station nearby), `macula_client/0' returns
-%%% `{error, no_client}' and consumers should fall back to no-op
-%%% behaviour. The service stays up; it just doesn't talk to the mesh.
+%%% Connect-degradation: with no seeds configured, `hecate_om_sup'
+%%% never starts a mesh pool child at all, and `macula_client/0'
+%%% returns `{error, no_client}' forever -- consumers fall back to
+%%% no-op behaviour, same contract as before this piece. The service
+%%% stays up either way; it just doesn't talk to the mesh.
+%%%
+%%% **The pool itself is no longer this gen_server's state.** It used
+%%% to be: a hand-rolled `self() ! connect' / 5s-retry / `erlang:
+%%% monitor' + `DOWN' dance defending against a pool crash and an
+%%% early-boot race against the `macula' OTP application not being up
+%%% yet. Both turned out to be things `macula_client' and OTP already
+%%% give for free once the pool is an ordinary supervised sibling
+%%% (`hecate_om_sup', `restart => permanent'): each seed link dials
+%%% and retries forever on its own timer without ever crashing the
+%%% pool process for an unreachable seed (confirmed by reading
+%%% `macula_client.erl' directly), so there is nothing for a hand-
+%%% rolled monitor to catch that OTP's own restart doesn't already
+%%% cover; and `hecate_om.app.src' already lists `macula' in
+%%% `applications', so standard OTP boot ordering means `macula' has
+%%% already finished starting before `hecate_om_app:start/2' -- and so
+%%% this module's own `init/1' -- is ever called. `start_mesh_pool/0'
+%%% below is that sibling child's start function: it runs strictly
+%%% after this gen_server (an earlier sibling in `hecate_om_sup''s
+%%% children list) has already loaded the keypair, so it reads it back
+%%% via `keypair/0' rather than duplicating the loading logic.
+%%% `macula_client/0' now simply checks whether that sibling is
+%%% registered and alive -- no gen_server round trip, no state to keep
+%%% in sync with reality.
 -module(hecate_om_identity).
 -behaviour(gen_server).
 
@@ -25,10 +49,17 @@
 %% Exported for hecate_om_identity_tests.erl -- pure resolution logic,
 %% same testing convention hecate_om_capabilities.erl already uses.
 -export([keypair_from/1]).
+%% Exported for hecate_om_sup.erl (deciding whether to include the mesh
+%% pool child at all) and as that child's own start function.
+-export([configured_seeds/0, start_mesh_pool/0]).
+
+%% Registered name of the mesh-pool sibling child hecate_om_sup starts
+%% (piece A) -- `macula_client/0' below looks it up directly rather
+%% than round-tripping through this gen_server.
+-define(MESH_POOL_NAME, hecate_om_mesh_pool).
 
 -record(state, {
     cert      :: binary() | undefined,
-    client    :: pid()    | undefined,
     realm     :: binary() | undefined,  %% 32-byte realm tag
     %% Stable service keypair, loaded from `identity_key_path' at boot
     %% and RETAINED so the service can sign its own DHT records
@@ -53,17 +84,23 @@
     realm_ca  :: binary() | undefined
 }).
 
-%% Retry cadence for (re)attaching the mesh pool.
--define(RECONNECT_MS, 5000).
-
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 service_cert() ->
     gen_server:call(?MODULE, service_cert).
 
+%% @doc The mesh pool handle, or `{error, no_client}' when no seeds are
+%% configured (so `hecate_om_sup' never started the pool child at all)
+%% or the pool hasn't registered itself yet. A direct `whereis/1' check
+%% on the pool's own registered name -- no gen_server round trip to
+%% this module, and nothing here to fall out of sync with reality.
+-spec macula_client() -> {ok, pid()} | {error, no_client}.
 macula_client() ->
-    gen_server:call(?MODULE, macula_client).
+    case whereis(?MESH_POOL_NAME) of
+        Pid when is_pid(Pid) -> {ok, Pid};
+        undefined             -> {error, no_client}
+    end.
 
 realm() ->
     gen_server:call(?MODULE, realm).
@@ -104,13 +141,7 @@ init([]) ->
     Realm   = load_realm(),
     KeyPair = load_keypair(),
     Org     = load_org(),
-    %% Connect off the init path and retry. At boot hecate_om may start
-    %% before the macula SDK app is fully up, so a single inline connect
-    %% races it and loses (the bug that kept services dark even with seeds).
-    %% handle_info(connect) attempts + reschedules until a pool attaches,
-    %% and re-attaches if the pool later dies.
-    self() ! connect,
-    {ok, #state{cert = Cert, client = undefined, realm = Realm,
+    {ok, #state{cert = Cert, realm = Realm,
                 keypair = KeyPair, org = Org,
                 org_ca = load_org_ca(), realm_ca = load_realm_ca()}}.
 
@@ -118,11 +149,6 @@ handle_call(service_cert, _From, #state{cert = undefined} = S) ->
     {reply, {error, no_cert}, S};
 handle_call(service_cert, _From, #state{cert = C} = S) ->
     {reply, {ok, C}, S};
-
-handle_call(macula_client, _From, #state{client = undefined} = S) ->
-    {reply, {error, no_client}, S};
-handle_call(macula_client, _From, #state{client = Pid} = S) ->
-    {reply, {ok, Pid}, S};
 
 handle_call(realm, _From, #state{realm = undefined} = S) ->
     {reply, {error, no_realm}, S};
@@ -153,22 +179,6 @@ handle_call(_Msg, _From, S) ->
 
 handle_cast(_Msg, S) -> {noreply, S}.
 
-handle_info(connect, #state{client = undefined, keypair = Kp} = S) ->
-    case attach_client(Kp) of
-        undefined ->
-            erlang:send_after(?RECONNECT_MS, self(), connect),
-            {noreply, S};
-        Pool ->
-            _ = is_pid(Pool) andalso erlang:monitor(process, Pool),
-            {noreply, S#state{client = Pool}}
-    end;
-handle_info(connect, S) ->
-    %% Already connected.
-    {noreply, S};
-handle_info({'DOWN', _Ref, process, Pool, _Reason}, #state{client = Pool} = S) ->
-    %% The mesh pool died — drop it and reconnect.
-    self() ! connect,
-    {noreply, S#state{client = undefined}};
 handle_info(_Msg, S) ->
     {noreply, S}.
 
@@ -214,12 +224,14 @@ load_realm() ->
             undefined
     end.
 
-%% @doc Connect to the mesh when station seeds are configured. The macula
-%% SDK auto-generates an ephemeral identity for empty opts (the proven path
-%% the hecate-daemon uses); when a stable on-disk service keypair is
-%% configured (`identity_key_path') we pass it so the service peers under a
-%% consistent node id across restarts. Degrades to `no_client' (the
-%% gen_server stays up) if seeds are unset or unreachable.
+%% @doc Start function for the mesh-pool child `hecate_om_sup' includes
+%% in its children list whenever seeds are configured (piece A). Runs
+%% as a sibling started strictly after this gen_server, so `keypair/0'
+%% is already resolved -- no duplicated loading logic here, just a
+%% read-back. Registers the pool under `?MESH_POOL_NAME' so
+%% `macula_client/0' can find it without a round trip through this
+%% module, then hands `{ok, Pid}' (or a genuine `{error, _}') back to
+%% the supervisor exactly like any other child start function.
 %%
 %% NOTE: connection no longer depends on the realm-signed cert. The macula
 %% `identity' opt wants a raw Ed25519 keypair, not a cert, and the mesh does
@@ -227,17 +239,18 @@ load_realm() ->
 %% to connect was spurious (it kept every service dark). The cert is still
 %% loaded + held (`service_cert/0') for the v2 swap-in, when the SDK enforces
 %% realm-signed identity and this is where it gets passed.
-attach_client(KeyPair) ->
-    connect_seeds(configured_seeds(), KeyPair).
-
-connect_seeds([], _KeyPair) ->
-    undefined;
-connect_seeds(Seeds, KeyPair) ->
-    try macula:connect(Seeds, keypair_opts(KeyPair)) of
-        {ok, Pool}    -> Pool;
-        {error, _Why} -> undefined
-    catch
-        _:_ -> undefined
+-spec start_mesh_pool() -> {ok, pid()} | {error, term()}.
+start_mesh_pool() ->
+    KeyPair = case keypair() of
+        {ok, Kp}             -> Kp;
+        {error, no_keypair}  -> undefined
+    end,
+    case macula:connect(configured_seeds(), keypair_opts(KeyPair)) of
+        {ok, Pid} ->
+            true = erlang:register(?MESH_POOL_NAME, Pid),
+            {ok, Pid};
+        {error, _Reason} = Err ->
+            Err
     end.
 
 %% Load the stable on-disk service keypair (macula-native format, via
