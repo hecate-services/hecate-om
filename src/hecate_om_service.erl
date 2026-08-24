@@ -102,5 +102,16 @@
      "may have a read model, an event store, both, or neither.".
 -callback read_model_id() -> binary().
 
+-doc "OPTIONAL. Topics this service subscribes to at boot: a list of "
+     "{Topic, HandlerModule, Args} triples, HandlerModule implementing "
+     "the `macula_subscriber' behaviour. hecate_om:boot/1 wires each "
+     "into a supervised macula_subscriber under hecate_om_pubsub_sup "
+     "before the service module's own start/1 runs. Call "
+     "hecate_om_pubsub:ensure_subscriptions/1 again whenever the "
+     "desired set changes at runtime (e.g. a new topic per newly-"
+     "registered entity) -- it diffs against what's currently running "
+     "and starts/stops only the delta.".
+-callback subscriptions() -> [{binary(), module(), term()}].
+
 -optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0,
-                     store_integrity/0, read_model_id/0]).
+                     store_integrity/0, read_model_id/0, subscriptions/0]).

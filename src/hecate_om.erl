@@ -44,8 +44,23 @@ boot(ServiceMod, Opts) when is_atom(ServiceMod), is_map(Opts) ->
     ok = maybe_wire_store(ServiceMod),
     ok = maybe_wire_read_model(ServiceMod),
     ok = hecate_om_capabilities:register(ServiceMod:capabilities()),
+    ok = maybe_wire_subscriptions(ServiceMod),
     ok = hecate_om_health:register(ServiceMod),
     ServiceMod:start(Opts).
+
+%% @private When the service module exports subscriptions/0, wire each
+%% declared {Topic, HandlerMod, Args} into a supervised macula_subscriber
+%% before the service's own start/1 runs. Producer-only / consumer-only
+%% services that omit the callback pay nothing.
+maybe_wire_subscriptions(ServiceMod) ->
+    _ = code:ensure_loaded(ServiceMod),
+    Has = erlang:function_exported(ServiceMod, subscriptions, 0),
+    wire_subscriptions(Has, ServiceMod).
+
+wire_subscriptions(false, _ServiceMod) ->
+    ok;
+wire_subscriptions(true, ServiceMod) ->
+    hecate_om_pubsub:ensure_subscriptions(ServiceMod:subscriptions()).
 
 %% @private When the service module exports both `store_id/0' and
 %% `data_dir/0', treat it as a CMD/PRJ service that owns a reckon-db

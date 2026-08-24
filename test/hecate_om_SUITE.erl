@@ -27,24 +27,27 @@ end_per_suite(_Config) ->
     ok.
 
 behaviour_attributes(_Config) ->
-    %% hecate_om_service declares 6 required callbacks + 6 optional ones
+    %% hecate_om_service declares 6 required callbacks + 7 optional ones
     %% (store_id/0, data_dir/0, store_indexes/0, store_mode/0,
-    %% store_integrity/0, read_model_id/0) for CMD/PRJ services that wire a
-    %% reckon-db store and/or a barrel_docdb read model. behaviour_info
-    %% (callbacks) returns all 12.
+    %% store_integrity/0, read_model_id/0, subscriptions/0) for CMD/PRJ
+    %% services that wire a reckon-db store, a barrel_docdb read model,
+    %% and/or a declarative pubsub subscription set. behaviour_info
+    %% (callbacks) returns all 13.
     Callbacks = hecate_om_service:behaviour_info(callbacks),
-    ?assertEqual(12, length(Callbacks)),
+    ?assertEqual(13, length(Callbacks)),
     Names = lists:sort(lists:map(fun({N, _A}) -> N end, Callbacks)),
     Expected = lists:sort([info, start, stop, health, capabilities,
                            identity_spec, store_id, data_dir, store_indexes,
-                           store_mode, store_integrity, read_model_id]),
+                           store_mode, store_integrity, read_model_id,
+                           subscriptions]),
     ?assertEqual(Expected, Names),
-    %% The store-wiring and read-model-wiring callbacks must be the
-    %% optional set.
+    %% The store-wiring, read-model-wiring, and subscriptions callbacks
+    %% must be the optional set.
     Optional = lists:sort(hecate_om_service:behaviour_info(optional_callbacks)),
     ?assertEqual(lists:sort([{store_id, 0}, {data_dir, 0},
                              {store_indexes, 0}, {store_mode, 0},
-                             {store_integrity, 0}, {read_model_id, 0}]),
+                             {store_integrity, 0}, {read_model_id, 0},
+                             {subscriptions, 0}]),
                  Optional).
 
 boot_dummy_service(_Config) ->

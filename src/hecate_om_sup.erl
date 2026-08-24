@@ -1,9 +1,14 @@
 %%% @doc Top-level supervisor for hecate-om.
 %%%
-%%% Owns three workers, all shared by the hosting service:
+%%% Owns four workers and one nested supervisor, all shared by the
+%%% hosting service:
 %%%   1. hecate_om_identity  — keeps the realm cert + UCAN cached
 %%%   2. hecate_om_capabilities — fans capability advertisements out
-%%%   3. hecate_om_health    — bookkeeping for /health responses
+%%%   3. hecate_om_pubsub_sup — dynamic supervisor of this service's
+%%%      macula_subscriber children (piece D)
+%%%   4. hecate_om_pubsub_subscriptions — reconciles the desired
+%%%      subscription set against (3)'s actual running children
+%%%   5. hecate_om_health    — bookkeeping for /health responses
 %%%
 %%% and, when `health_port' is configured, the Cowboy listener that actually
 %%% serves `GET /health' on it (so Podman's HEALTHCHECK and k8s liveness probes
@@ -26,6 +31,8 @@ init([]) ->
     Children = [
         worker(hecate_om_identity),
         worker(hecate_om_capabilities),
+        supervisor_child(hecate_om_pubsub_sup),
+        worker(hecate_om_pubsub_subscriptions),
         worker(hecate_om_health)
     ] ++ health_listener(),
     {ok, {SupFlags, Children}}.
@@ -54,5 +61,15 @@ worker(Module) ->
         restart  => permanent,
         shutdown => 5000,
         type     => worker,
+        modules  => [Module]
+    }.
+
+supervisor_child(Module) ->
+    #{
+        id       => Module,
+        start    => {Module, start_link, []},
+        restart  => permanent,
+        shutdown => infinity,
+        type     => supervisor,
         modules  => [Module]
     }.

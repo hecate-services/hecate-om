@@ -24,6 +24,7 @@
 -module(hecate_om_pubsub).
 
 -export([publish/2, publish/3, publish_many/2, publish_many/3]).
+-export([ensure_subscriptions/1]).
 
 %% Pure helpers — realm/mode resolution kept side-effect-free so it is
 %% unit-testable without a live mesh (same convention as
@@ -147,6 +148,22 @@ fold_publish([Topic | Rest], Payload, Opts, Acc) ->
 
 combine(ok, Result) -> Result;
 combine({error, _} = Err, _Result) -> Err.
+
+%% @doc Declare the desired subscription set: one supervised
+%% `macula_subscriber' per `{Topic, HandlerMod, Args}' not already
+%% running (`HandlerMod' implementing the `macula_subscriber'
+%% behaviour); any running one no longer in the set is stopped. Safe to
+%% call repeatedly whenever the desired set changes at runtime — e.g. a
+%% `federation_inbox'-shaped service adding one topic per newly-
+%% registered entity — diffs against what's currently running and
+%% touches only the delta. Self-heals on a 30s reconcile tick
+%% independent of any caller: a topic that couldn't start because the
+%% mesh wasn't attached yet, or whose child exhausted its own restart
+%% budget after a full pool replacement, is retried automatically. See
+%% `hecate_om_pubsub_subscriptions' for the mechanism.
+-spec ensure_subscriptions([{binary(), module(), term()}]) -> ok.
+ensure_subscriptions(Desired) ->
+    hecate_om_pubsub_subscriptions:ensure(Desired).
 
 %%%===================================================================
 %%% macula_publisher callbacks
