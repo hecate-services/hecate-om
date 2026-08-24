@@ -57,7 +57,7 @@ run() ->
     %% The escape hatch: a caller-supplied feeder/downloader pair,
     %% proven with a real round trip against the same station, not
     %% just a return-value shape assertion.
-    {ok, FeederPid} = hecate_om_content:start_feeder(?MODULE, Blob, self()),
+    {ok, FeederPid} = hecate_om_content:start_feeder(?MODULE, Blob, {simple, self()}),
     ?assert(is_pid(FeederPid)),
     CustomMcid = receive
         {custom_feeder_result, {ok, M}} -> M;
@@ -65,7 +65,8 @@ run() ->
     after 10_000 -> erlang:error(no_feed_result)
     end,
 
-    {ok, DownloaderPid} = hecate_om_content:start_downloader(?MODULE, CustomMcid, self()),
+    {ok, DownloaderPid} = hecate_om_content:start_downloader(?MODULE, CustomMcid,
+                                                             {simple, self()}),
     ?assert(is_pid(DownloaderPid)),
     CustomBytes = receive
         {custom_downloader_result, {ok, B}} -> B;
@@ -74,20 +75,49 @@ run() ->
     end,
     ?assertEqual(Blob, CustomBytes),
 
+    %% The other motivating scenario for this escape hatch (see the
+    %% "imagine such a service exists" discussion,
+    %% PLAN_HECATE_OM_MESH_WRAPPERS.md piece E): a batch upload wanting
+    %% a per-item completion signal without blocking on each one. Run
+    %% to real completion against the live station, not just asserted
+    %% possible -- 3 independent feeders started concurrently, this
+    %% test acting as its own collector; "all 3 accounted for" is the
+    %% batch-complete signal a real service would act on (e.g.
+    %% updating a progress row).
+    BatchItems = [{I, <<"batch item ", (integer_to_binary(I))/binary>>}
+                  || I <- [1, 2, 3]],
+    _ = [hecate_om_content:start_feeder(?MODULE, ItemBlob, {batch, I, self()})
+         || {I, ItemBlob} <- BatchItems],
+    BatchResults = [await_batch_item(I, 10_000) || {I, _} <- BatchItems],
+    ?assert(lists:all(fun({ok, M}) -> is_binary(M) end, BatchResults)),
+    ?assertEqual(3, length(lists:usort([M || {ok, M} <- BatchResults]))),
+
     meck:unload(hecate_om),
     catch macula_client:close(Pool),
     ok.
 
-%% Feeder/downloader callbacks for the escape-hatch proof above.
-init(Pid) -> {ok, Pid}.
+await_batch_item(Index, Timeout) ->
+    receive
+        {batch_item_done, Index, Result} -> Result
+    after Timeout -> erlang:error({no_batch_result, Index})
+    end.
 
-handle_fed(Result, Pid) ->
+%% Feeder/downloader callbacks, dispatching on Args/State shape:
+%%   {simple, Pid}              -- one-shot relay
+%%   {batch, Index, Collector}  -- batch-upload completion signal
+init({simple, _Pid} = Args) -> {ok, Args};
+init({batch, _Index, _Collector} = Args) -> {ok, Args}.
+
+handle_fed(Result, {simple, Pid} = State) ->
     Pid ! {custom_feeder_result, Result},
-    {stop, normal, Pid}.
+    {stop, normal, State};
+handle_fed(Result, {batch, Index, Collector} = State) ->
+    Collector ! {batch_item_done, Index, Result},
+    {stop, normal, State}.
 
-handle_downloaded(Result, Pid) ->
+handle_downloaded(Result, {simple, Pid} = State) ->
     Pid ! {custom_downloader_result, Result},
-    {stop, normal, Pid}.
+    {stop, normal, State}.
 
 wait_healthy(_Pool, 0) ->
     erlang:error(seed_never_healthy);

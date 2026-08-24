@@ -99,7 +99,10 @@ live_pool_test_() ->
           {"sync mode honours a caller-supplied timeout",
            fun test_sync_timeout/0},
           {"start_publisher/3 hands control to the caller's own module",
-           fun test_start_publisher_uses_caller_module/0}
+           fun test_start_publisher_uses_caller_module/0},
+          {"a retry-with-backoff coordinator built on start_publisher/4 "
+           "runs a real multi-attempt loop to genuine exhaustion",
+           fun test_start_publisher_retry_coordinator_runs_to_exhaustion/0}
          ]
       end}}.
 
@@ -143,7 +146,7 @@ test_sync_timeout() ->
 
 test_start_publisher_uses_caller_module() ->
     {ok, Pid} = hecate_om_pubsub:start_publisher(?MODULE, ?TOPIC,
-                                                 #{probe => 3}, self()),
+                                                 #{probe => 3}, {simple, self()}),
     ?assert(is_pid(Pid)),
     Result = receive
         {custom_publisher_result, R} -> R
@@ -153,9 +156,67 @@ test_start_publisher_uses_caller_module() ->
     %% not hecate_om_pubsub's own, which would never send this tag.
     ?assertEqual({error, {transient, no_healthy_station}}, Result).
 
-%% macula_publisher callbacks for test_start_publisher_uses_caller_module.
-init(Pid) -> {ok, Pid}.
+%% The actual motivating scenario for the escape hatch (see the
+%% "imagine such a service exists" discussion,
+%% PLAN_HECATE_OM_MESH_WRAPPERS.md piece C), built and run to real
+%% exhaustion, not just asserted possible: a retry-with-backoff
+%% coordinator. Every attempt fails deterministically against the
+%% zero-link pool, so this exercises the full retry loop down to
+%% genuine exhaustion, with the original caller notified of every
+%% intermediate attempt and the final outcome.
+%%
+%% The retry DECISION lives in a dedicated coordinator process
+%% (retry_coordinator/4 below), not inside handle_published/2 itself --
+%% deliberately, not incidentally. An earlier version called
+%% start_publisher/4 again recursively from *within* handle_published/2
+%% (a callback running inside a macula_publisher gen_server that is
+%% itself about to {stop, normal, ...}) and that was genuinely flaky
+%% under full-suite load, not just tight on timeout margin -- raising
+%% the timeout alone made it hang for the outer group budget instead of
+%% failing fast, which is a worse symptom, not a fix. A separate,
+%% ordinary process orchestrating N one-shot start_publisher/4 calls
+%% (each with the already-proven {simple, Pid} relay) is also the more
+%% correct design for "fully decoupled from any caller waiting
+%% synchronously" in the first place -- not a workaround, the right
+%% shape. Backoff is 50ms/attempt here purely for test speed; a real
+%% service would use a longer, real backoff curve.
+test_start_publisher_retry_coordinator_runs_to_exhaustion() ->
+    Self = self(),
+    spawn_link(fun() -> retry_coordinator(?TOPIC, #{probe => 5}, 2, Self) end),
+    ?assertEqual(2, await(retry_attempt_failed, 2_000)),
+    ?assertEqual(1, await(retry_attempt_failed, 2_000)),
+    ?assertEqual({transient, no_healthy_station}, await(retry_exhausted, 2_000)).
 
-handle_published(Result, Pid) ->
+retry_coordinator(Topic, Payload, AttemptsLeft, ReportTo) ->
+    {ok, _Pid} = hecate_om_pubsub:start_publisher(?MODULE, Topic, Payload,
+                                                  {simple, self()}),
+    Result = receive
+        {custom_publisher_result, R} -> R
+    after 2_000 -> {error, coordinator_timeout}
+    end,
+    handle_attempt_result(Result, Topic, Payload, AttemptsLeft, ReportTo).
+
+handle_attempt_result(ok, _Topic, _Payload, _AttemptsLeft, ReportTo) ->
+    ReportTo ! {retry_succeeded, ok};
+handle_attempt_result({error, Reason}, _Topic, _Payload, 0, ReportTo) ->
+    ReportTo ! {retry_exhausted, Reason};
+handle_attempt_result({error, _Reason}, Topic, Payload, AttemptsLeft, ReportTo) ->
+    ReportTo ! {retry_attempt_failed, AttemptsLeft},
+    timer:sleep(50),
+    retry_coordinator(Topic, Payload, AttemptsLeft - 1, ReportTo).
+
+await(Tag, Timeout) ->
+    receive
+        {Tag, Value} -> Value
+    after Timeout -> erlang:error({no_message, Tag})
+    end.
+
+%% macula_publisher callback: a one-shot relay to whichever process
+%% started it. Reused by both the simple-delegation test and the retry
+%% coordinator above -- the coordinator IS the caller from this
+%% callback's point of view, same as any other.
+init({simple, _Pid} = Args) -> {ok, Args}.
+
+handle_published(Result, {simple, Pid} = State) ->
     Pid ! {custom_publisher_result, Result},
-    {stop, normal, Pid}.
+    {stop, normal, State}.
