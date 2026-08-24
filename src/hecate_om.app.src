@@ -1,6 +1,6 @@
 {application, hecate_om, [
     {description, "Hecate-over-mesh: shared substrate for hecate-* service daemons"},
-    {vsn, "0.14.2"},
+    {vsn, "0.15.0"},
     {registered, [hecate_om_sup]},
     {mod, {hecate_om_app, []}},
     {applications, [
@@ -15,7 +15,12 @@
         %% get the canonical reckon-db + evoq wiring for free.
         reckon_db,
         evoq,
-        reckon_evoq
+        reckon_evoq,
+
+        %% Used by hecate_om_read_model when a service module exports
+        %% read_model_id/0 + data_dir/0. Same shape as the reckon-db deps
+        %% above: starts idle (no database opened) until a service asks.
+        barrel_docdb
     ]},
     {env, [
         %% Service-principal cert path. The container mounts
@@ -53,6 +58,6 @@
     {modules, []},
     {licenses, ["Apache-2.0"]},
     {links, [
-        {"Codeberg", "https://codeberg.org/hecate-services/hecate-om"}
+        {"GitHub", "https://github.com/hecate-services/hecate-om"}
     ]}
 ]}.

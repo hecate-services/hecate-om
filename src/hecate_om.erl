@@ -7,6 +7,7 @@
 %%%   hecate_om:health()                   %% snapshot for /health
 %%%   hecate_om:service_cert()             %% load my service-principal cert
 %%%   hecate_om:macula_client()            %% returns the SDK client handle
+%%%   hecate_om:read_model()               %% my barrel_docdb database name
 -module(hecate_om).
 
 -export([
@@ -20,10 +21,12 @@
     realm/0,
     keypair/0,
     mesh_handles/0,
-    service_module/0
+    service_module/0,
+    read_model/0
 ]).
 
 -define(SERVICE_MODULE_KEY, hecate_om_service_module).
+-define(READ_MODEL_KEY, hecate_om_read_model_db).
 
 %% @doc Wire a service module into hecate_om and start it.
 %%
@@ -39,6 +42,7 @@ boot(ServiceMod) ->
 boot(ServiceMod, Opts) when is_atom(ServiceMod), is_map(Opts) ->
     persistent_term:put(?SERVICE_MODULE_KEY, ServiceMod),
     ok = maybe_wire_store(ServiceMod),
+    ok = maybe_wire_read_model(ServiceMod),
     ok = hecate_om_capabilities:register(ServiceMod:capabilities()),
     ok = hecate_om_health:register(ServiceMod),
     ServiceMod:start(Opts).
@@ -98,9 +102,45 @@ store_integrity(ServiceMod) ->
         false -> disabled
     end.
 
+%% @private When the service module exports both `read_model_id/0' and
+%% `data_dir/0', open its barrel_docdb read-model database before the
+%% service's own start/1 runs. Independent of maybe_wire_store/1 — a
+%% service may declare a read model, an event store, both, or neither.
+%% Services that don't use one pay nothing beyond the idle barrel_docdb
+%% application already started as part of hecate_om.
+maybe_wire_read_model(ServiceMod) ->
+    _ = code:ensure_loaded(ServiceMod),
+    Has = erlang:function_exported(ServiceMod, read_model_id, 0) andalso
+          erlang:function_exported(ServiceMod, data_dir, 0),
+    wire_read_model(Has, ServiceMod).
+
+wire_read_model(false, _ServiceMod) ->
+    ok;
+wire_read_model(true, ServiceMod) ->
+    DbName  = ServiceMod:read_model_id(),
+    DataDir = ServiceMod:data_dir(),
+    persistent_term:put(?READ_MODEL_KEY, DbName),
+    ensured_read_model(hecate_om_read_model:ensure(DbName, DataDir), ServiceMod).
+
+ensured_read_model(ok, _ServiceMod) ->
+    ok;
+ensured_read_model({error, Why}, ServiceMod) ->
+    error({hecate_om_read_model_failed, ServiceMod, Why}).
+
 -spec service_module() -> module() | undefined.
 service_module() ->
     persistent_term:get(?SERVICE_MODULE_KEY, undefined).
+
+%% @doc This service's read-model database name (the barrel_docdb handle —
+%% pass it straight to barrel_docdb:put_doc/2, get_doc/2, fold_docs/3, ...).
+%% `{error, no_read_model}' when the service module doesn't export
+%% read_model_id/0 + data_dir/0.
+-spec read_model() -> {ok, binary()} | {error, no_read_model}.
+read_model() ->
+    case persistent_term:get(?READ_MODEL_KEY, undefined) of
+        undefined -> {error, no_read_model};
+        DbName    -> {ok, DbName}
+    end.
 
 %% @doc (Re-)publish this service's capabilities onto the mesh.
 %% Typically called once at boot; call again when the capability

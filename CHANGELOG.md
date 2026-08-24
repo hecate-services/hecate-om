@@ -3,6 +3,26 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.15.0] - 2026-08-24
+
+### Added
+
+- `read_model_id/0` optional `hecate_om_service` callback (alongside
+  `data_dir/0`): `hecate_om:boot/1` opens a `barrel_docdb` database at
+  `<data_dir>/<read_model_id>/` before the service's own `start/1` runs,
+  the same shape as the existing `store_id/0` reckon-db wiring but for a
+  persistent, queryable read model instead of an event store. New
+  `hecate_om_read_model:ensure/2` helper, new `hecate_om:read_model/0`
+  facade accessor. `barrel_docdb` is now a hard dependency (same "everyone
+  pays, only starts if declared" shape as reckon_db/evoq — note this one
+  carries a real native build cost too, rocksdb's C++ library, not a free
+  dep). Only `barrel_docdb`, not the full `barrel`/`barrel_vectordb`
+  umbrella; a service that wants vector or hybrid search in its read model
+  adds that itself. Meant to replace the class of bug where an ETS-backed
+  read model silently loses its contents on every restart (see
+  hecate-spartan's registry/inbox history) — barrel_docdb reopens from its
+  on-disk RocksDB directory, nothing to rebuild.
+
 ## [0.14.2] - 2026-08-23
 
 ### Fixed

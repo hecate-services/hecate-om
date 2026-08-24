@@ -85,5 +85,15 @@
      "loaded, so provision the key before enabling.".
 -callback store_integrity() -> disabled | map().
 
+-doc "OPTIONAL. The barrel_docdb database name this service's read model "
+     "lives in (lowercase alphanumerics/underscore/hyphen, 1-63 chars — see "
+     "barrel_docdb:validate_db_name/1). When exported alongside data_dir/0, "
+     "hecate_om:boot/1 opens the database at data_dir/read_model_id before "
+     "calling ServiceMod:start/1. PRJ code writes to it with barrel_docdb "
+     "directly, using this same name as the database handle — there is no "
+     "separate accessor to call first. Independent of store_id/0: a service "
+     "may have a read model, an event store, both, or neither.".
+-callback read_model_id() -> binary().
+
 -optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0,
-                     store_integrity/0]).
+                     store_integrity/0, read_model_id/0]).
