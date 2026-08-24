@@ -23,7 +23,8 @@
 
 -type info()           :: #{name := binary(), version := binary(), description := binary()}.
 -type health()         :: ok | {degraded, term()} | {down, term()}.
--type capability()     :: #{name := binary(), version := pos_integer()}.
+-type capability()     :: #{name := binary(), version := pos_integer(),
+                            handler => {module(), term()}}.
 -type identity_spec()  :: #{scope := binary(),
                             actions := [binary()],
                             resources := [binary()],
@@ -43,8 +44,14 @@
 -doc "Snapshot of current health. Called every /health hit.".
 -callback health() -> health().
 
--doc "Capabilities this service exposes, to be advertised on the "
-     "mesh. Other services find this one by these names.".
+-doc "Capabilities this service exposes, to be advertised on the mesh. "
+     "Other services find this one by these names. A capability whose "
+     "map includes `handler => {HandlerModule, Args}' (HandlerModule "
+     "implementing the `macula_response' behaviour) is advertised via "
+     "`macula_response:advertise_direct/7' -- discoverable AND directly "
+     "callable. A capability with no `handler' key is written as a "
+     "bare discovery record only (today's behavior, kept for services "
+     "that advertise a capability another mechanism serves).".
 -callback capabilities() -> [capability()].
 
 -doc "UCAN this service wants minted by hecate-realm at boot. "

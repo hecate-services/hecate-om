@@ -8,6 +8,12 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
+%% Placeholder macula_response callback module (piece B tests below) —
+%% referenced only by module atom (`{?MODULE, []}'), dispatched at real
+%% inbound-call time, which these tests never reach (no live station).
+-behaviour(macula_response).
+-export([init/1, handle_request/2]).
+
 realm()      -> crypto:strong_rand_bytes(32).
 station()    -> crypto:strong_rand_bytes(32).
 cap(Name)    -> #{name => Name, version => 1}.
@@ -115,6 +121,26 @@ build_advertisement_chain_verifies_to_realm_ca_test() ->
     ?assertEqual({error, no_cert_chain},
                  macula_record:verify_advertisement_cert_chain(RealmCa, NoChain, <<"acme">>)).
 
+%%% Piece B (PLAN_HECATE_OM_MESH_WRAPPERS.md): a capability carrying
+%%% `handler => {Module, Args}' is advertised via
+%%% `macula_response:advertise_direct/7' instead of the legacy bare
+%%% `put_record'. `has_handler/1' is the dispatch decision;
+%%% `reuse_sup_opts/1' is what keeps a periodic re-advertise from
+%%% leaking one factory supervisor per tick.
+
+has_handler_distinguishes_capability_shapes_test() ->
+    ?assert(hecate_om_capabilities:has_handler(
+              #{name => <<"svc.do">>, version => 1,
+                handler => {my_mod, []}})),
+    ?assertNot(hecate_om_capabilities:has_handler(
+                 #{name => <<"svc.do">>, version => 1})).
+
+reuse_sup_opts_carries_a_known_sup_and_nothing_else_test() ->
+    ?assertEqual(#{}, hecate_om_capabilities:reuse_sup_opts(undefined)),
+    Sup = self(),
+    ?assertEqual(#{reuse_sup => Sup},
+                 hecate_om_capabilities:reuse_sup_opts(Sup)).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.
@@ -123,13 +149,18 @@ gen_server_degrades_without_mesh_test_() ->
     {setup, fun start_servers/0, fun stop_servers/1,
      fun(_) ->
         Cap = #{name => <<"svc.do">>, version => 1},
+        %% A handler-bearing capability must degrade exactly the same
+        %% way — advertise_direct is never even reached with no
+        %% pool/keypair/realm, same as the legacy put_record path.
+        HandlerCap = #{name => <<"svc.answer">>, version => 1,
+                       handler => {?MODULE, []}},
         [
          %% register + publish must not crash when there is no pool /
          %% keypair / realm — they no-op and the timer retries later.
-         ?_assertEqual(ok, hecate_om_capabilities:register([Cap])),
+         ?_assertEqual(ok, hecate_om_capabilities:register([Cap, HandlerCap])),
          ?_assertEqual(ok, hecate_om_capabilities:publish()),
          %% own caps are still reported (used by /health + the SUITE)
-         ?_assertEqual([Cap], hecate_om_capabilities:list()),
+         ?_assertEqual([Cap, HandlerCap], hecate_om_capabilities:list()),
          %% resolution with no pool yields an empty set, not a crash
          ?_assertEqual({ok, []}, hecate_om_capabilities:lookup(<<"svc.do">>)),
          %% and identity reports the missing signing key cleanly
@@ -150,6 +181,67 @@ start_servers() ->
 stop_servers({I, C}) ->
     catch gen_server:stop(C),
     catch gen_server:stop(I),
+    ok.
+
+%%%===================================================================
+%%% Live pool, zero seeds — reaches the real macula_response:advertise_direct
+%%% boundary without a station. Same technique as hecate_om_pubsub_tests:
+%%% macula_client:connect([], #{}) gives a real pool with zero spawned
+%%% links, so macula:advertise/5 (which advertise_direct calls first)
+%%% genuinely returns {error, no_healthy_station} from the SDK itself —
+%%% proving the wiring reaches macula_response correctly, even though it
+%%% can't succeed without a real station to register with. The stronger
+%%% claim -- a handler-bearing capability is genuinely CALLABLE end to
+%%% end -- needs a real macula-station and is NOT covered here; see the
+%%% plan doc's acceptance note for piece B.
+%%%===================================================================
+
+live_pool_handler_capability_test_() ->
+    {timeout, 15,
+     {setup, fun start_live/0, fun stop_live/1,
+      fun(_) ->
+         Cap = #{name => <<"svc.answer">>, version => 1,
+                handler => {?MODULE, []}},
+         [
+          {"register with a handler-bearing capability reaches the SDK "
+           "boundary and degrades cleanly with no healthy station",
+           fun() ->
+              ?assertEqual(ok, hecate_om_capabilities:register([Cap]))
+           end},
+          {"a second tick (simulating the 30s republish timer) is just "
+           "as stable -- proves repeated failed advertise_direct calls "
+           "don't accumulate state or crash the worker",
+           fun() ->
+              ?assertEqual(ok, hecate_om_capabilities:publish()),
+              ?assertEqual(ok, hecate_om_capabilities:publish())
+           end}
+         ]
+      end}}.
+
+init(_Args) -> {ok, []}.
+handle_request(_Payload, State) -> {reply, ok, State}.
+
+start_live() ->
+    {ok, _} = application:ensure_all_started(macula),
+    {ok, Pool} = macula_client:connect([], #{}),
+    Realm = crypto:strong_rand_bytes(32),
+    KeyPair = macula_identity:generate(),
+    %% A real hecate_om_identity too -- do_advertise/2 also calls org/0
+    %% and cert_chain/0, which passthrough would otherwise route to a
+    %% real gen_server:call with nothing registered to answer it.
+    {ok, I} = hecate_om_identity:start_link(),
+    ok = meck:new(hecate_om_identity, [passthrough]),
+    ok = meck:expect(hecate_om_identity, macula_client, fun() -> {ok, Pool} end),
+    ok = meck:expect(hecate_om_identity, realm, fun() -> {ok, Realm} end),
+    ok = meck:expect(hecate_om_identity, keypair, fun() -> {ok, KeyPair} end),
+    {ok, C} = hecate_om_capabilities:start_link(),
+    {I, Pool, C}.
+
+stop_live({I, Pool, C}) ->
+    catch gen_server:stop(C),
+    meck:unload(hecate_om_identity),
+    catch gen_server:stop(I),
+    catch macula_client:close(Pool),
     ok.
 
 %%% Minimal in-process X.509 CA (realm CA -> org CA -> Ed25519 leaf

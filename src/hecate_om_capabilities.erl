@@ -1,20 +1,33 @@
-%%% @doc Advertises a service's capabilities as signed procedure
-%%% advertisements in the mesh DHT, and resolves other services'
-%%% capabilities from the same DHT.
+%%% @doc Advertises a service's capabilities on the mesh, and resolves
+%%% other services' capabilities from the DHT.
 %%%
-%%% Replaces the former pubsub `_mesh.cap.announce' summary broadcast:
-%%% discovery is record-based now (direct-dial discovery, plan Slice 2).
-%%% For each capability the service exposes, this worker writes a signed
-%%% `procedure_advertisement' keyed at `SHA-256(procedure_uri)', naming
-%%% the service (advertiser) and one station it is reachable through
-%%% (serving_station). Records are re-asserted on a timer because DHT
-%%% records expire (and the timer also retries the initial write until
-%%% the pool and a station link are up).
+%%% A capability carrying `handler => {HandlerModule, Args}' is advertised
+%%% via `macula_response:advertise_direct/7' — the SDK's own supervised
+%%% wrapper, which registers the handler with the pool AND publishes the
+%%% signed `procedure_advertisement' DHT record naming this pool's
+%%% connected station, in one call. This module used to hand-build that
+%%% same record type itself (`build_advertisement/5,6' + `put_record')
+%%% without ever registering a handler — discoverable, but not callable
+%%% (the gap the 2026-08-21 survey confirmed; see
+%%% `hecate-om/plans/PLAN_HECATE_OM_MESH_WRAPPERS.md', piece B). A
+%%% capability with no `handler' key still gets that legacy record-only
+%%% path, kept for backward compatibility with a capability another
+%%% mechanism serves.
+%%%
+%%% `reuse_sup/0''s pid is round-tripped through this worker's state and
+%%% passed back in as `advertise_direct's own `reuse_sup' option on every
+%%% 30s republish tick — a station's wire-level registration for a
+%%% procedure is tied to the connection that sent it and does not survive
+%%% that connection being replaced (see `macula_response:advertise_direct/7'
+%%% and `hecate-tube''s `tube_mesh_providers.erl', which hit this bug
+%%% live before this option existed); periodic re-advertise without
+%%% `reuse_sup' would also leak one factory supervisor per tick.
 %%%
 %%% `lookup/1' resolves a capability by name: derive the same procedure
 %%% key, read every advertisement stored there, verify each signature,
 %%% return the `{advertiser, serving_station}' set. A consumer then dials
-%%% one of those stations (Slice 4+).
+%%% one of those stations (Slice 4+) — unchanged by the handler-vs-record-
+%%% only split above, since both paths write the same record shape.
 %%%
 %%% Signing needs the service's stable keypair
 %%% (`hecate_om_identity:keypair/0'); an ephemeral service cannot sign
@@ -26,10 +39,12 @@
 -export([call_capability/5, call_capability/7]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
-%% Pure helpers — the record-building and resolution logic, kept
-%% side-effect-free so it is unit-testable without a live mesh.
+%% Pure helpers — the record-building, dispatch-decision, and resolution
+%% logic, kept side-effect-free so it is unit-testable without a live
+%% mesh.
 -export([procedure_uri/3, build_advertisement/5, build_advertisement/6,
-         decode_resolved/1, station_url/2]).
+         decode_resolved/1, station_url/2, has_handler/1, reuse_sup_opts/1,
+         discovery_key/2]).
 
 %% Re-assert advertisements this often. Records outlive one interval;
 %% the tick also retries the initial write until the pool + a station
@@ -37,8 +52,12 @@
 -define(REPUBLISH_INTERVAL_MS, 30_000).
 
 -record(state, {
-    capabilities = []        :: [hecate_om_service:capability()],
-    timer        = undefined :: reference() | undefined
+    capabilities   = []        :: [hecate_om_service:capability()],
+    timer          = undefined :: reference() | undefined,
+    %% Capability name -> factory supervisor pid from a prior
+    %% advertise_direct/7 call. Passed back in as `reuse_sup' on the
+    %% next tick for that capability; see moduledoc.
+    advertise_sups = #{}       :: #{binary() => pid()}
 }).
 
 %%% API
@@ -86,13 +105,14 @@ list() ->
 init([]) ->
     {ok, arm_timer(#state{})}.
 
-handle_call({register, Caps}, _From, S) ->
-    do_advertise(Caps),
-    {reply, ok, S#state{capabilities = Caps}};
+handle_call({register, Caps}, _From, #state{advertise_sups = Sups} = S) ->
+    NewSups = do_advertise(Caps, Sups),
+    {reply, ok, S#state{capabilities = Caps, advertise_sups = NewSups}};
 
-handle_call(publish, _From, #state{capabilities = Caps} = S) ->
-    do_advertise(Caps),
-    {reply, ok, S};
+handle_call(publish, _From, #state{capabilities = Caps,
+                                   advertise_sups = Sups} = S) ->
+    NewSups = do_advertise(Caps, Sups),
+    {reply, ok, S#state{advertise_sups = NewSups}};
 
 handle_call({lookup, CapName}, _From, S) ->
     {reply, {ok, do_resolve(CapName)}, S};
@@ -105,46 +125,85 @@ handle_call(_Msg, _From, S) ->
 
 handle_cast(_Msg, S) -> {noreply, S}.
 
-handle_info(republish, #state{capabilities = Caps} = S) ->
-    do_advertise(Caps),
-    {noreply, arm_timer(S)};
+handle_info(republish, #state{capabilities = Caps,
+                              advertise_sups = Sups} = S) ->
+    NewSups = do_advertise(Caps, Sups),
+    {noreply, arm_timer(S#state{advertise_sups = NewSups})};
 handle_info(_Other, S) ->
     {noreply, S}.
 
 terminate(_, _) -> ok.
 
-%%% Internals — advertise (write records)
+%%% Internals — advertise (write records / register handlers)
 
-do_advertise([]) ->
-    ok;
-do_advertise(Caps) ->
+do_advertise(Caps, Sups) ->
     advertise_with(hecate_om_identity:macula_client(),
                    hecate_om_identity:keypair(),
                    hecate_om_identity:realm(),
                    hecate_om_identity:org(),
                    cert_chain_opts(hecate_om_identity:cert_chain()),
-                   Caps).
+                   Caps, Sups).
 
 %% Embed the service cert chain when one is provisioned (Slice 7c
 %% Direction B); otherwise advertise without it (open-mode discovery).
 cert_chain_opts({ok, Pem})  -> #{cert_chain => Pem};
 cert_chain_opts({error, _}) -> #{}.
 
-advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, CertOpts, Caps) ->
-    advertise_at(serving_station(Pool), Pool, KeyPair, Realm, Org, CertOpts, Caps);
+advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, CertOpts, Caps, Sups) ->
+    lists:foldl(fun(Cap, Acc) ->
+                    advertise_one(Pool, KeyPair, Realm, Org, CertOpts, Cap, Acc)
+                end, Sups, Caps);
 %% Missing pool / keypair / realm: cannot reach the mesh or sign. No-op;
-%% the timer retries once all three are present.
-advertise_with(_Pool, _KeyPair, _Realm, _Org, _CertOpts, _Caps) ->
-    ok.
+%% the timer retries once all three are present. Existing sups (if any)
+%% are kept as-is — a transient mesh gap does not invalidate them.
+advertise_with(_Pool, _KeyPair, _Realm, _Org, _CertOpts, _Caps, Sups) ->
+    Sups.
 
-advertise_at({ok, Station}, Pool, KeyPair, Realm, Org, CertOpts, Caps) ->
-    _ = [put_advertisement(Pool,
-                           build_advertisement(KeyPair, Realm, Org, Cap, Station,
-                                               CertOpts))
-         || Cap <- Caps],
-    ok;
-advertise_at({error, no_station}, _Pool, _KeyPair, _Realm, _Org, _CertOpts,
-             _Caps) ->
+%% @doc Whether `Cap' carries a handler (and so should be advertised via
+%% `advertise_direct', not just written to the DHT as a bare discovery
+%% record).
+-spec has_handler(hecate_om_service:capability()) -> boolean().
+has_handler(#{handler := _}) -> true;
+has_handler(_) -> false.
+
+advertise_one(Pool, KeyPair, Realm, _Org, CertOpts,
+             #{name := Name, handler := {Mod, Args}}, Sups) ->
+    %% Procedure MUST be the bare capability name, not procedure_uri/3's
+    %% Realm+Org+Name form: hecate_om_capabilities:call_capability/7
+    %% dials via macula:call_station(..., CapName, ...) -- the bare
+    %% name -- so the wire-level ADVERTISE registration this creates
+    %% has to match that exactly, or a resolved provider would never
+    %% actually answer a CALL. macula_response:advertise_direct wraps
+    %% `Name' with Realm itself (macula_direct_dial's own
+    %% discovery_uri/2, "no Org segment... Org is only consulted
+    %% post-resolve") for the DHT record — matched on the read side by
+    %% discovery_key/2 below, not by procedure_uri/3.
+    Opts = maps:merge(CertOpts, reuse_sup_opts(maps:get(Name, Sups, undefined))),
+    advertised(macula_response:advertise_direct(Pool, Realm, Name, Mod, Args,
+                                                KeyPair, Opts),
+              Name, Sups);
+advertise_one(Pool, KeyPair, Realm, Org, CertOpts, Cap, Sups) ->
+    %% No handler declared — legacy discoverable-but-not-callable path,
+    %% kept for a capability another mechanism serves.
+    advertise_record_only(serving_station(Pool), Pool, KeyPair, Realm, Org,
+                          CertOpts, Cap),
+    Sups.
+
+%% @doc The extra `Opts' entry an `advertise_direct' retry needs to reuse
+%% a prior call's factory supervisor instead of leaking a new one every
+%% republish tick. `#{}' on a capability's first-ever advertise.
+-spec reuse_sup_opts(pid() | undefined) -> map().
+reuse_sup_opts(undefined)            -> #{};
+reuse_sup_opts(Sup) when is_pid(Sup) -> #{reuse_sup => Sup}.
+
+advertised({ok, Sup}, Name, Sups)   -> Sups#{Name => Sup};
+advertised({error, _Reason}, _Name, Sups) -> Sups.
+
+advertise_record_only({ok, Station}, Pool, KeyPair, Realm, Org, CertOpts, Cap) ->
+    put_advertisement(Pool, build_advertisement(KeyPair, Realm, Org, Cap,
+                                                Station, CertOpts));
+advertise_record_only({error, no_station}, _Pool, _KeyPair, _Realm, _Org,
+                      _CertOpts, _Cap) ->
     ok.
 
 put_advertisement(Pool, Record) ->
@@ -184,18 +243,28 @@ resolve_with({ok, Pool}, {ok, Realm}, Org, CapName) ->
 resolve_with(_Pool, _Realm, _Org, _CapName) ->
     [].
 
-resolve_at(Pool, Realm, Org, CapName) ->
-    Key = macula_record:procedure_key(procedure_uri(Realm, Org, CapName)),
-    resolve_records(find(Pool, Key)).
+resolve_at(Pool, Realm, _Org, CapName) ->
+    resolve_records(find(Pool, discovery_key(Realm, CapName))).
+
+%% The key a handler-bearing capability is actually reachable under:
+%% Realm + the bare capability name, matching macula_direct_dial's own
+%% (private, so replicated here) discovery_uri/2 formula -- NOT
+%% procedure_uri/3, whose Org segment matches nothing advertise_direct
+%% itself ever produces (see advertise_one/7). A capability advertised
+%% via the legacy record-only path (no handler, never callable via
+%% call_capability regardless) is not resolvable through this lookup —
+%% documented as written "for a capability another mechanism serves".
+discovery_key(Realm, Name) ->
+    macula_record:procedure_key(<<(binary:encode_hex(Realm))/binary, "/",
+                                  Name/binary>>).
 
 resolve_records({ok, Records}) -> decode_resolved(Records);
 resolve_records(_Other)        -> [].
 
 %% Like resolve_at/4 but keeps each raw record so the verifying-consumer
 %% path (7c Direction B) can chain-check the embedded service cert.
-resolve_full(Pool, Realm, Org, CapName) ->
-    Key = macula_record:procedure_key(procedure_uri(Realm, Org, CapName)),
-    resolve_full_records(find(Pool, Key)).
+resolve_full(Pool, Realm, _Org, CapName) ->
+    resolve_full_records(find(Pool, discovery_key(Realm, CapName))).
 
 resolve_full_records({ok, Records}) -> decode_resolved_full(Records);
 resolve_full_records(_Other)        -> [].
@@ -263,15 +332,34 @@ call_providers([], _Pool, _Realm, _CapName, _Payload, _TimeoutMs, _Ucan) ->
     {error, no_provider};
 call_providers([#{serving_station := Station} | Rest],
                Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
-    dial_provider(resolve_endpoint(Pool, Station),
+    dial_provider(resolve_endpoint(Pool, Station), Station,
                   Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan).
 
 %% Endpoint resolved: dial + call; on error, fail over to the next.
-dial_provider({ok, Url}, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
-    failover(macula:call_station(Pool, Url, Realm, CapName, Payload, TimeoutMs,
-                                 #{ucan_token => Ucan}),
-             Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan);
-dial_provider({error, _}, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan) ->
+%%
+%% Trust triad matches macula_direct_dial:call/6 exactly (verified
+%% against a real demo-fleet station, 2026-08-24 -- omitting it makes
+%% every direct-dial call fail with `not_connected', not a signature
+%% or auth error, because the failure is at the TLS layer before the
+%% application-level trust check ever runs): a resolved provider is
+%% trusted because the signed DHT `procedure_advertisement' chain
+%% named exactly this `Station' pubkey, not because its TLS
+%% certificate chains to a CA -- a production station's TLS cert has
+%% no relationship to its macula identity. `verify => none' +
+%% `pin_tls_cert => false' skip the (irrelevant) TLS check;
+%% `expected_node_id => Station' is what actually pins trust, enforced
+%% at the application layer during the CONNECT/HELLO handshake.
+dial_provider({ok, Url}, Station, Rest, Pool, Realm, CapName, Payload,
+              TimeoutMs, Ucan) ->
+    CallResult = macula:call_station(Pool, Url, Realm, CapName, Payload,
+                                     TimeoutMs,
+                                     #{ucan_token => Ucan,
+                                       expected_node_id => Station,
+                                       pin_tls_cert => false,
+                                       verify => none}),
+    failover(CallResult, Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan);
+dial_provider({error, _}, _Station, Rest, Pool, Realm, CapName, Payload,
+              TimeoutMs, Ucan) ->
     call_providers(Rest, Pool, Realm, CapName, Payload, TimeoutMs, Ucan).
 
 failover({ok, _} = Ok, _R, _P, _Rlm, _Cap, _Pl, _Tmo, _Ucan) ->
