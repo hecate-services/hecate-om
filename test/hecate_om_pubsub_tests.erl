@@ -7,6 +7,14 @@
 -module(hecate_om_pubsub_tests).
 -include_lib("eunit/include/eunit.hrl").
 
+%% A caller-supplied macula_publisher callback, standing in for a
+%% service that needs outcome handling start_publisher/3,4,5 exists
+%% for (see the escape-hatch discussion, PLAN_HECATE_OM_MESH_WRAPPERS.md
+%% piece C) -- proves start_publisher/3,4,5 genuinely hands control to
+%% THIS module, not hecate_om_pubsub's own.
+-behaviour(macula_publisher).
+-export([init/1, handle_published/2]).
+
 -define(TOPIC, <<"hecate_om_pubsub.test_v1">>).
 
 %%%===================================================================
@@ -43,7 +51,10 @@ publish_degrades_without_mesh_test_() ->
                        hecate_om_pubsub:publish(?TOPIC, #{probe => 1})),
          ?_assertEqual({error, mesh_unavailable},
                        hecate_om_pubsub:publish(?TOPIC, #{probe => 1},
-                                                #{mode => sync}))
+                                                #{mode => sync})),
+         ?_assertEqual({error, mesh_unavailable},
+                       hecate_om_pubsub:start_publisher(?MODULE, ?TOPIC,
+                                                        #{probe => 1}))
         ]
      end}.
 
@@ -86,7 +97,9 @@ live_pool_test_() ->
           {"publish_many/2 attempts every topic and reports any failure",
            fun test_publish_many/0},
           {"sync mode honours a caller-supplied timeout",
-           fun test_sync_timeout/0}
+           fun test_sync_timeout/0},
+          {"start_publisher/3 hands control to the caller's own module",
+           fun test_start_publisher_uses_caller_module/0}
          ]
       end}}.
 
@@ -127,3 +140,22 @@ test_sync_timeout() ->
                                       #{mode => sync, timeout => 1}),
     ?assert(Result =:= {error, timeout} orelse
             Result =:= {error, {transient, no_healthy_station}}).
+
+test_start_publisher_uses_caller_module() ->
+    {ok, Pid} = hecate_om_pubsub:start_publisher(?MODULE, ?TOPIC,
+                                                 #{probe => 3}, self()),
+    ?assert(is_pid(Pid)),
+    Result = receive
+        {custom_publisher_result, R} -> R
+    after 2_000 -> erlang:error(no_result)
+    end,
+    %% Real SDK outcome, reaching THIS module's handle_published/2 --
+    %% not hecate_om_pubsub's own, which would never send this tag.
+    ?assertEqual({error, {transient, no_healthy_station}}, Result).
+
+%% macula_publisher callbacks for test_start_publisher_uses_caller_module.
+init(Pid) -> {ok, Pid}.
+
+handle_published(Result, Pid) ->
+    Pid ! {custom_publisher_result, Result},
+    {stop, normal, Pid}.

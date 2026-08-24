@@ -24,6 +24,7 @@
 -module(hecate_om_pubsub).
 
 -export([publish/2, publish/3, publish_many/2, publish_many/3]).
+-export([start_publisher/3, start_publisher/4, start_publisher/5]).
 -export([ensure_subscriptions/1]).
 
 %% Pure helpers — realm/mode resolution kept side-effect-free so it is
@@ -85,7 +86,7 @@ publish(Topic, Payload, Opts)
 do_publish({ok, Pool, DefaultRealm}, Topic, Payload, Opts) ->
     Realm = resolve_realm(Opts, DefaultRealm),
     Mode  = resolve_mode(Opts),
-    start_publisher(Mode, Pool, Realm, Topic, Payload, Opts);
+    publish_with_mode(Mode, Pool, Realm, Topic, Payload, Opts);
 do_publish({error, mesh_unavailable} = Err, _Topic, _Payload, _Opts) ->
     Err.
 
@@ -101,9 +102,9 @@ resolve_realm(Opts, DefaultRealm) ->
 resolve_mode(Opts) ->
     maps:get(mode, Opts, async_silent).
 
-start_publisher(sync, Pool, Realm, Topic, Payload, Opts) ->
+publish_with_mode(sync, Pool, Realm, Topic, Payload, Opts) ->
     sync_publish(Pool, Realm, Topic, Payload, Opts);
-start_publisher(Mode, Pool, Realm, Topic, Payload, _Opts) ->
+publish_with_mode(Mode, Pool, Realm, Topic, Payload, _Opts) ->
     started(macula_publisher:start_link(?MODULE, Pool, Realm, Topic, Payload,
                                         {Mode, Topic})).
 
@@ -148,6 +149,51 @@ fold_publish([Topic | Rest], Payload, Opts, Acc) ->
 
 combine(ok, Result) -> Result;
 combine({error, _} = Err, _Result) -> Err.
+
+%% @doc Start a supervised `macula_publisher' with a caller-supplied
+%% callback `Module', using this service's own mesh handle and realm —
+%% the escape hatch for outcome handling `publish/2,3''s three fixed
+%% modes don't cover (e.g. retry-with-backoff on failure, fully
+%% decoupled from any caller waiting synchronously — a real need that
+%% just hasn't shown up in a surveyed repo yet, unlike the three modes,
+%% which were each derived from one). Resolves
+%% `hecate_om:mesh_handles/0' the same way `publish/2,3' does, so
+%% reaching for this instead of `publish/2,3' doesn't mean duplicating
+%% that boilerplate — that resolution is the one thing worth getting
+%% from `hecate_om_pubsub' either way. `Module' must implement
+%% `-behaviour(macula_publisher)' itself; `hecate_om_pubsub' has no
+%% say over what its `handle_published/2' does.
+%%
+%% `Args' is passed to `Module:init/1', same as
+%% `macula_publisher:start_link/6' itself; default `undefined' when
+%% omitted. `Opts' accepts `realm' only (see `publish/3') — `mode' and
+%% `timeout' don't apply, since the caller's own `Module' owns the
+%% outcome entirely.
+-spec start_publisher(module(), binary(), term()) ->
+    {ok, pid()} | {error, term()}.
+start_publisher(Module, Topic, Payload) ->
+    start_publisher(Module, Topic, Payload, undefined, #{}).
+
+%% @doc As `start_publisher/3', with `Args' passed to `Module:init/1'.
+-spec start_publisher(module(), binary(), term(), term()) ->
+    {ok, pid()} | {error, term()}.
+start_publisher(Module, Topic, Payload, Args) ->
+    start_publisher(Module, Topic, Payload, Args, #{}).
+
+%% @doc As `start_publisher/4', with `Opts' (`realm' only — see above).
+-spec start_publisher(module(), binary(), term(), term(), #{realm => binary()}) ->
+    {ok, pid()} | {error, term()}.
+start_publisher(Module, Topic, Payload, Args, Opts)
+  when is_atom(Module), is_binary(Topic), is_map(Opts) ->
+    do_start_publisher(hecate_om:mesh_handles(), Module, Topic, Payload,
+                       Args, Opts).
+
+do_start_publisher({ok, Pool, DefaultRealm}, Module, Topic, Payload, Args, Opts) ->
+    Realm = resolve_realm(Opts, DefaultRealm),
+    macula_publisher:start_link(Module, Pool, Realm, Topic, Payload, Args);
+do_start_publisher({error, mesh_unavailable} = Err, _Module, _Topic, _Payload,
+                   _Args, _Opts) ->
+    Err.
 
 %% @doc Declare the desired subscription set: one supervised
 %% `macula_subscriber' per `{Topic, HandlerMod, Args}' not already

@@ -20,7 +20,12 @@ content_degrades_without_mesh_test_() ->
          ?_assertEqual({error, mesh_unavailable},
                        hecate_om_content:put(<<"hello">>)),
          ?_assertEqual({error, mesh_unavailable},
-                       hecate_om_content:get(<<1, 16#55, "not-a-real-mcid">>))
+                       hecate_om_content:get(<<1, 16#55, "not-a-real-mcid">>)),
+         ?_assertEqual({error, mesh_unavailable},
+                       hecate_om_content:start_feeder(some_module, <<"hello">>)),
+         ?_assertEqual({error, mesh_unavailable},
+                       hecate_om_content:start_downloader(
+                         some_module, <<1, 16#55, "not-a-real-mcid">>))
         ]
      end}.
 
