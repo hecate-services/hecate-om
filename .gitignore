@@ -9,5 +9,7 @@ rebar3.crashdump
 *.swp
 .DS_Store
 
+/data/
+
 # ex_doc / edoc generated output
 /doc/
