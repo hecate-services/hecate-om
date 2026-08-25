@@ -40,6 +40,20 @@
 %%% `macula_client/0' now simply checks whether that sibling is
 %%% registered and alive -- no gen_server round trip, no state to keep
 %%% in sync with reality.
+%%%
+%%% **Piece H** (`PLAN_HECATE_OM_MESH_WRAPPERS.md'): every OTHER
+%%% accessor here (`service_cert/0', `realm/0', `keypair/0', `org/0',
+%%% `cert_chain/0', `realm_ca/0') used to be a bare `gen_server:call',
+%%% which raises `{noproc, _}' if called before this gen_server has
+%%% started. Three independent repos (`hecate-biotope', `hecate-
+%%% society', `hecate-dronex') hand-rolled a try/catch around exactly
+%%% this -- `hecate_om_identity:realm()' specifically, confirmed by
+%%% reading `biotope_mesh.erl'/`society_mesh.erl'/`dronex_mesh.erl'
+%%% directly, not assumed. `safe_call/1' converts that one specific
+%%% failure mode (not a genuine timeout -- a hung gen_server is a real
+%%% bug worth crashing loudly over, not silently degrading) into
+%%% `{error, not_booted}', obsoleting all three call sites' defenses at
+%%% once rather than leaving each caller to reinvent it.
 -module(hecate_om_identity).
 -behaviour(gen_server).
 
@@ -87,8 +101,12 @@
 start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
+%% @doc The realm-signed service-principal cert, `{error, no_cert}'
+%% when unset, or `{error, not_booted}' (piece H) when called before
+%% this gen_server has started.
+-spec service_cert() -> {ok, binary()} | {error, no_cert | not_booted}.
 service_cert() ->
-    gen_server:call(?MODULE, service_cert).
+    safe_call(service_cert).
 
 %% @doc The mesh pool handle, or `{error, no_client}' when no seeds are
 %% configured (so `hecate_om_sup' never started the pool child at all)
@@ -102,36 +120,67 @@ macula_client() ->
         undefined             -> {error, no_client}
     end.
 
+%% @doc The 32-byte realm tag, `{error, no_realm}' when unset, or
+%% `{error, not_booted}' (piece H) when called before this gen_server
+%% has started -- this is the specific accessor `hecate-biotope',
+%% `hecate-society', and `hecate-dronex' each wrap in a hand-rolled
+%% try/catch today, confirmed by reading their `*_mesh.erl' directly.
+-spec realm() -> {ok, <<_:256>>} | {error, no_realm | not_booted}.
 realm() ->
-    gen_server:call(?MODULE, realm).
+    safe_call(realm).
 
-%% @doc The service's stable signing keypair, or `{error, no_keypair}'
-%% when running on an ephemeral identity. Callers that sign DHT records
-%% degrade to no-op on the error.
--spec keypair() -> {ok, macula_identity:key_pair()} | {error, no_keypair}.
+%% @doc The service's stable signing keypair, `{error, no_keypair}'
+%% when running on an ephemeral identity (callers that sign DHT records
+%% degrade to no-op on that), or `{error, not_booted}' (piece H) when
+%% called before this gen_server has started.
+-spec keypair() -> {ok, macula_identity:key_pair()} |
+                    {error, no_keypair | not_booted}.
 keypair() ->
-    gen_server:call(?MODULE, keypair).
+    safe_call(keypair).
 
 %% @doc This service's org name (the `<org>' segment of its procedure
-%% URIs). Always a binary; `<<"_">>' when unconfigured.
+%% URIs). Always a binary -- `<<"_">>' both when unconfigured and
+%% (piece H) when called before this gen_server has started, since
+%% "we don't have a real org value yet" is the same situation to every
+%% caller either way, and this accessor's whole contract is never
+%% raising and never asking the caller to unwrap a tuple.
 -spec org() -> binary().
 org() ->
-    gen_server:call(?MODULE, org).
+    case safe_call(org) of
+        {error, not_booted} -> <<"_">>;
+        Org                  -> Org
+    end.
 
 %% @doc The cert chain to embed in advertisements: this service's leaf
 %% cert followed by its org CA (PEM). `{error, no_cert_chain}' when
 %% either half is missing — the service then advertises without a chain
 %% and is reachable only by open-mode consumers (Slice 7c Direction B).
--spec cert_chain() -> {ok, binary()} | {error, no_cert_chain}.
+%% `{error, not_booted}' (piece H) when called before this gen_server
+%% has started.
+-spec cert_chain() -> {ok, binary()} | {error, no_cert_chain | not_booted}.
 cert_chain() ->
-    gen_server:call(?MODULE, cert_chain).
+    safe_call(cert_chain).
 
 %% @doc The realm CA a verifying consumer trusts as the direct-dial
 %% trust anchor (PEM). `{error, no_realm_ca}' when unconfigured — a
 %% `verify => true' call then cannot verify and drops every provider.
--spec realm_ca() -> {ok, binary()} | {error, no_realm_ca}.
+%% `{error, not_booted}' (piece H) when called before this gen_server
+%% has started.
+-spec realm_ca() -> {ok, binary()} | {error, no_realm_ca | not_booted}.
 realm_ca() ->
-    gen_server:call(?MODULE, realm_ca).
+    safe_call(realm_ca).
+
+%% @doc `gen_server:call/2' to this identity process, converting the
+%% one failure mode that means "called before boot" (`{noproc, _}' --
+%% no such registered process, or it died between the lookup and the
+%% send) into `{error, not_booted}' instead of raising. A genuine
+%% timeout is a different, real bug -- a hung gen_server is worth
+%% crashing loudly over, not silently degrading -- so it is
+%% deliberately left to propagate, not caught here.
+safe_call(Msg) ->
+    try gen_server:call(?MODULE, Msg)
+    catch exit:{noproc, _} -> {error, not_booted}
+    end.
 
 init([]) ->
     Cert  = case load_cert() of
@@ -241,9 +290,15 @@ load_realm() ->
 %% realm-signed identity and this is where it gets passed.
 -spec start_mesh_pool() -> {ok, pid()} | {error, term()}.
 start_mesh_pool() ->
+    %% Runs strictly after this gen_server has already started (an
+    %% earlier sibling in hecate_om_sup's children list), so keypair/0
+    %% can never actually see {error, not_booted} here -- matched
+    %% alongside {error, no_keypair} anyway rather than pattern-
+    %% matching the specific reason, so this stays correct regardless
+    %% of what keypair/0's error shape does in the future (piece H).
     KeyPair = case keypair() of
-        {ok, Kp}             -> Kp;
-        {error, no_keypair}  -> undefined
+        {ok, Kp}    -> Kp;
+        {error, _}  -> undefined
     end,
     case macula:connect(configured_seeds(), keypair_opts(KeyPair)) of
         {ok, Pid} ->

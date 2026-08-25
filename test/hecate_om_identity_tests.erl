@@ -1,9 +1,11 @@
-%%% Unit tests for hecate_om_identity's keypair resolution
+%%% Unit tests for hecate_om_identity: keypair resolution
 %%% (hecate_om_identity:keypair_from/1) -- self-healing generate-on-
 %%% missing behavior. Confirmed live: without this, a service whose
 %%% job is a direct-dial RPC/Streaming provider (hecate-tube) silently
 %%% never advertises anything -- keypair/0 stays {error, no_keypair}
 %%% forever, unless something out-of-band provisions the file first.
+%%% Also configured_seeds/0 (piece A) and the non-raising accessor
+%%% contract (piece H) -- see PLAN_HECATE_OM_MESH_WRAPPERS.md.
 -module(hecate_om_identity_tests).
 -include_lib("eunit/include/eunit.hrl").
 
@@ -104,3 +106,47 @@ set_env(EnvVal) -> os:putenv("MACULA_STATION_SEEDS", EnvVal).
 
 set_app_env(undefined) -> application:unset_env(hecate_om, station_seeds);
 set_app_env(Seeds)     -> application:set_env(hecate_om, station_seeds, Seeds).
+
+%% Piece H (PLAN_HECATE_OM_MESH_WRAPPERS.md): calling an accessor
+%% before hecate_om_identity has started must degrade to {error,
+%% not_booted} rather than raising {noproc, _}. Several OTHER test
+%% modules in this suite start a real hecate_om_identity in their own
+%% fixtures, so "not started yet" cannot be assumed from ordinary
+%% EUnit execution order in a shared VM -- ensured directly here
+%% instead, same defensive-teardown discipline as
+%% hecate_om_pubsub_subscriptions_tests.erl's stop_supervisor/1.
+accessors_degrade_instead_of_raising_when_not_booted_test_() ->
+    {setup, fun ensure_identity_not_running/0, fun restore_identity/1,
+     fun(_) ->
+        [
+         ?_assertEqual({error, not_booted}, hecate_om_identity:realm()),
+         ?_assertEqual({error, not_booted}, hecate_om_identity:keypair()),
+         ?_assertEqual({error, not_booted}, hecate_om_identity:service_cert()),
+         ?_assertEqual({error, not_booted}, hecate_om_identity:cert_chain()),
+         ?_assertEqual({error, not_booted}, hecate_om_identity:realm_ca()),
+         %% org/0's contract is "always a binary" -- not_booted collapses
+         %% into the same placeholder as "unconfigured", not a new shape.
+         ?_assertEqual(<<"_">>, hecate_om_identity:org())
+        ]
+     end}.
+
+%% Returns whatever was running before (a pid, or `undefined') so the
+%% teardown can decide whether to put a fresh one back -- this suite
+%% doesn't own whether some other module wants one alive afterwards,
+%% only that it's genuinely absent for the body of this test.
+ensure_identity_not_running() ->
+    case whereis(hecate_om_identity) of
+        undefined -> undefined;
+        Pid ->
+            unlink(Pid),
+            Ref = monitor(process, Pid),
+            exit(Pid, kill),
+            receive
+                {'DOWN', Ref, process, Pid, _Reason} -> ok
+            after 2_000 -> ok
+            end,
+            running
+    end.
+
+restore_identity(undefined) -> ok;
+restore_identity(running)   -> {ok, _} = hecate_om_identity:start_link(), ok.
