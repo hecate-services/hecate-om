@@ -13,6 +13,19 @@ Versioning: [SemVer](https://semver.org/).
   on any consumer of this library (see macula CHANGELOG [10.10.0]).
   Confirmed no use of anything removed in 10.0.0's macula-net deletion;
   full eunit + CT suite clean at the new version.
+- `rebar3 dialyzer` failed the release gate with 3 "Callback info about
+  the X behaviour is not available" warnings (macula_publisher,
+  macula_feeder, macula_download) — confirmed pre-existing at macula
+  10.0.0 too, not caused by the bump above. Root cause: `exclude_apps`
+  drops `macula` from the PLT entirely (it ships without `debug_info`,
+  a NIF-heavy lib, which otherwise hard-fails dialyzer), so the three
+  behaviours this module implements have no callback info to check
+  against. `no_unknown` doesn't cover this — the warning is tagged
+  `?WARN_UNDEFINED_CALLBACK` internally (`dialyzer_behaviours.erl`),
+  not `?WARN_UNKNOWN`, and `no_behaviours` (`?WARN_BEHAVIOUR`) is also
+  the wrong option, verified against dialyzer 5.4's own source before
+  picking `no_undefined_callbacks`. Clean run confirmed on a fully
+  fresh PLT.
 
 ## [0.15.0] - 2026-08-24
 
