@@ -3,6 +3,17 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.15.1] - 2026-08-27
+
+### Fixed
+
+- Bumped `macula` dependency 10.0.0 -> 10.10.0. Had drifted 10 releases
+  behind the fleet (currently 10.10.0), including the domain-filter fix
+  that was silently dropping every `macula_diagnostics:event/2,3` call
+  on any consumer of this library (see macula CHANGELOG [10.10.0]).
+  Confirmed no use of anything removed in 10.0.0's macula-net deletion;
+  full eunit + CT suite clean at the new version.
+
 ## [0.15.0] - 2026-08-24
 
 ### Added
