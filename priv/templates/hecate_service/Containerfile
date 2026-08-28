@@ -23,7 +23,14 @@ WORKDIR /build
 # than fetch a prebuilt binary linked against a different libc, which is the
 # recorded glibc trap: the fetched artifact loads on the build host and fails on
 # alpine at runtime.
-RUN apk add --no-cache git curl bash build-base cmake perl linux-headers
+#
+# openssl-dev/zstd-dev/snappy-dev/lz4-dev: hecate_om pulls in rocksdb (via
+# barrel_docdb) and khepri/ra transitively, UNCONDITIONALLY -- confirmed on a
+# storeless, producer-only service (no store_id/0 or data_dir/0 exported),
+# which still failed to build without these. Not specific to a service that
+# owns its own reckon-db store.
+RUN apk add --no-cache git curl bash build-base cmake perl linux-headers \
+        openssl-dev zstd-dev snappy-dev lz4-dev
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
         | sh -s -- -y --default-toolchain stable --profile minimal
 ENV PATH="/root/.cargo/bin:${PATH}"
