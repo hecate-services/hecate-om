@@ -45,10 +45,6 @@
         %% hecate_om_identity:configured_seeds/0.
         {station_seeds, []},
 
-        %% Station socket path (advisory — used by future seed-
-        %% inference logic; the SDK currently takes host/port seeds).
-        {station_socket,    "/run/macula/station.sock"},
-
         %% Loopback health endpoint port.
         {health_port,       8470},
 

@@ -5,7 +5,6 @@
 [
     {hecate_om, [
         {service_cert_path, "/etc/hecate/secrets/service-cert.pem"},
-        {station_socket,    "/run/macula/station.sock"},
         {health_port,       ${HECATE_HEALTH_PORT}},
         {capability_topic,  <<"_mesh.cap.">>},
         %% THE REALM IS AN APPLICATION ENV, NOT A SHELL VARIABLE, and this file
