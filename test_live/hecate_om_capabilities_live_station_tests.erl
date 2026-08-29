@@ -190,6 +190,63 @@ run_org_scoped() ->
     ?assertMatch({ok, #{answered_by := <<"acme">>}}, ToAcme),
     ?assertMatch({ok, #{answered_by := <<"contoso">>}}, ToContoso).
 
+%%%===================================================================
+%%% Org capability browse (slice 4) -- list_org_capabilities/1 finds
+%%% every capability an org has advertised, live, without knowing any
+%%% capability name in advance.
+%%%===================================================================
+
+list_org_capabilities_finds_everything_the_org_advertised_test_() ->
+    {timeout, 30, fun run_list_org_capabilities/0}.
+
+run_list_org_capabilities() ->
+    {ok, _} = application:ensure_all_started(macula),
+    Realm = crypto:strong_rand_bytes(32),
+    KpAcme = macula_identity:generate(#{puzzle => true}),
+    {ok, PoolAcme} = macula_client:connect([?SEED], #{identity => KpAcme}),
+    ok = wait_healthy(PoolAcme, 100),
+
+    %% Acme advertises TWO distinct capabilities; a third org (Contoso)
+    %% advertises one under the SAME bare name as one of Acme's, to
+    %% prove the browse is genuinely org-scoped, not name-collision-prone.
+    ok = advertise_org(PoolAcme, Realm, <<"hecate_om_live_test.browse_a">>,
+                       KpAcme, <<"acme">>, <<"acme">>),
+    ok = advertise_org(PoolAcme, Realm, <<"hecate_om_live_test.browse_b">>,
+                       KpAcme, <<"acme">>, <<"acme">>),
+    KpContoso = macula_identity:generate(#{puzzle => true}),
+    {ok, PoolContoso} = macula_client:connect([?SEED], #{identity => KpContoso}),
+    ok = wait_healthy(PoolContoso, 100),
+    ok = advertise_org(PoolContoso, Realm, <<"hecate_om_live_test.browse_a">>,
+                       KpContoso, <<"contoso">>, <<"contoso">>),
+
+    ConsumerKp = macula_identity:generate(#{puzzle => true}),
+    {ok, ConsumerPool} = macula_client:connect([?SEED], #{identity => ConsumerKp}),
+    ok = wait_healthy(ConsumerPool, 100),
+    timer:sleep(2_000),
+
+    %% Explicit-args form (resolve_org_capabilities/3), not the
+    %% gen_server-backed list_org_capabilities/1 -- this proves the
+    %% underlying browse mechanism; the identity-mocking plumbing
+    %% list_org_capabilities/1 would need is already proven by every
+    %% other live test in this module.
+    Found = hecate_om_capabilities:resolve_org_capabilities(
+              ConsumerPool, Realm, <<"acme">>),
+
+    catch macula_client:close(PoolAcme),
+    catch macula_client:close(PoolContoso),
+    catch macula_client:close(ConsumerPool),
+
+    Uris = [maps:get(procedure_uri, F) || F <- Found],
+    ExpectA = hecate_om_capabilities:procedure_uri(
+                Realm, <<"acme">>, <<"hecate_om_live_test.browse_a">>),
+    ExpectB = hecate_om_capabilities:procedure_uri(
+                Realm, <<"acme">>, <<"hecate_om_live_test.browse_b">>),
+    ContosoUri = hecate_om_capabilities:procedure_uri(
+                   Realm, <<"contoso">>, <<"hecate_om_live_test.browse_a">>),
+    ?assert(lists:member(ExpectA, Uris)),
+    ?assert(lists:member(ExpectB, Uris)),
+    ?assertNot(lists:member(ContosoUri, Uris)).
+
 %% Mirrors advertise_one/7's handler-bearing clause (2026-08-29): TWO
 %% independent advertise_direct calls, bare name and org_procedure(Org,
 %% CapName), each registering its own wire-level handler AND publishing

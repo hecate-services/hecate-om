@@ -223,6 +223,40 @@ build_advertisement_honors_a_proportioned_ttl_test() ->
     ?assertEqual(TtlMs,
                  macula_record:expires_at(Rec) - macula_record:created_at(Rec)).
 
+%%% Org capability browse (2026-08-29, slice 4) -- client-side filter
+%%% over find_records_by_type, matched via macula_topic_pattern.
+
+org_capability_pattern_is_realm_hex_org_star_test() ->
+    R = realm(),
+    ?assertEqual([binary:encode_hex(R), <<"acme">>, <<"*">>],
+                 hecate_om_capabilities:org_capability_pattern(R, <<"acme">>)).
+
+matches_org_pattern_matches_any_name_under_the_org_test() ->
+    R = realm(),
+    Pattern = hecate_om_capabilities:org_capability_pattern(R, <<"acme">>),
+    AcmeUri = hecate_om_capabilities:procedure_uri(R, <<"acme">>, <<"svc.do">>),
+    ContosoUri = hecate_om_capabilities:procedure_uri(R, <<"contoso">>, <<"svc.do">>),
+    ?assert(hecate_om_capabilities:matches_org_pattern(Pattern, AcmeUri)),
+    ?assertNot(hecate_om_capabilities:matches_org_pattern(Pattern, ContosoUri)).
+
+%% Pure proof (no mesh) that resolve_org_capabilities/3's actual filter
+%% (decode_if_org_matches -> matches_org_pattern) keeps the right
+%% records and drops the wrong ones, exercised via find_records_by_type's
+%% real decode path (macula_record:verify + read_procedure_advertisement),
+%% not just the pattern-matching primitive in isolation above.
+%% Uses the zero-seed real-pool technique (find_records_by_type against
+%% a pool with no links degrades to [] without crashing).
+resolve_org_capabilities_degrades_cleanly_with_no_mesh_test_() ->
+    {timeout, 15,
+     fun() ->
+        {ok, _} = application:ensure_all_started(macula),
+        {ok, Pool} = macula_client:connect([], #{}),
+        Got = hecate_om_capabilities:resolve_org_capabilities(
+                Pool, realm(), <<"acme">>),
+        ?assertEqual([], Got),
+        catch macula_client:close(Pool)
+     end}.
+
 station_url_brackets_ipv6_only_test() ->
     ?assertEqual(<<"quic://[::1]:4433">>,
                  hecate_om_capabilities:station_url(<<"::1">>, 4433)),

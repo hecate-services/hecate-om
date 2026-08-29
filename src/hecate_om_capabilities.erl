@@ -70,13 +70,36 @@
 %%% key, read every advertisement stored there, verify each signature,
 %%% return the `{advertiser, serving_station}' set.
 %%%
+%%% `list_org_capabilities/1' browses every capability an org has
+%%% advertised — genuinely new, unlike `lookup/1'/`call_capability': the
+%%% bare key needs a capability NAME to look anything up, and so does the
+%%% org-qualified key (`discovery_key_org/3', `Realm/Org/Name' — Name is
+%%% part of the key, not something a lookup can search past). There is no
+%%% NAME-less "everything Org has" key to resolve. A DHT-composite-key
+%%% design (publish the same record again under an org-prefix-only key) —
+%%% the original plan for this — turned out infeasible:
+%%% `macula_record:storage_key/1' DERIVES a `procedure_advertisement''s
+%%% storage key from its own `procedure_uri' payload, so a record cannot
+%%% be stored under an independently-chosen key without its `procedure_uri'
+%%% field lying about what it actually is. Building a second, genuinely
+%%% separate DHT record type just for this (with its own write-conflict
+%%% semantics for multiple advertisers of one org) was judged more than
+%%% this needs. Instead: `list_org_capabilities/1' is a CLIENT-SIDE filter
+%%% over `macula:find_records_by_type/2' (matched via
+%%% `macula_topic_pattern:matches/2') — the exact same local-relay-view,
+%%% warm-start-only mechanism `read_model_services.md' already documents
+%%% for bulk browsing, honestly inheriting its "one relay's local view,
+%%% not authoritative" limitation rather than pretending to a DHT-wide
+%%% index this record type cannot support.
+%%%
 %%% Signing needs the service's stable keypair
 %%% (`hecate_om_identity:keypair/0'); an ephemeral service cannot sign
 %%% and is correctly not advertised.
 -module(hecate_om_capabilities).
 -behaviour(gen_server).
 
--export([start_link/0, register/1, publish/0, lookup/1, list/0]).
+-export([start_link/0, register/1, publish/0, lookup/1, list/0,
+         list_org_capabilities/1]).
 -export([call_capability/5, call_capability/7]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2]).
 
@@ -87,7 +110,15 @@
          build_advertisement/6, decode_resolved/1, station_url/2,
          has_handler/1, reuse_sup_opts/1, advertise_opts/1,
          discovery_key/2, discovery_key_org/3,
-         org_scoped_or_any/4, org_scoped_full_or_any/5]).
+         org_scoped_or_any/4, org_scoped_full_or_any/5,
+         org_capability_pattern/2, matches_org_pattern/2,
+         resolve_org_capabilities/3]).
+
+%% `macula_record.erl''s own `?TYPE_PROCEDURE_ADVERTISEMENT' — not
+%% exported there (no shared header defines it either), so mirrored here.
+%% MUST match `macula_record.erl''s definition exactly; a mismatch would
+%% make `list_org_capabilities/1' silently see nothing.
+-define(TYPE_PROCEDURE_ADVERTISEMENT, 6).
 
 %% Re-assert advertisements this often. Records outlive one interval;
 %% the tick also retries the initial write until the pool + a station
@@ -132,6 +163,17 @@ publish() ->
 -spec lookup(binary()) -> {ok, [map()]}.
 lookup(CapName) when is_binary(CapName) ->
     gen_server:call(?MODULE, {lookup, CapName}).
+
+%% @doc Every capability `Org' has advertised — `{ok,
+%% [#{procedure_uri := binary(), advertiser := Pubkey, serving_station :=
+%% Pubkey}]}'. See moduledoc for why this is a client-side filter over
+%% `find_records_by_type', not a DHT-indexed query: a WARM-START view of
+%% whatever this pool's connected station(s) locally hold, not an
+%% authoritative mesh-wide listing. Empty when nothing matches or the
+%% mesh is unreachable, same as `lookup/1'.
+-spec list_org_capabilities(binary()) -> {ok, [map()]}.
+list_org_capabilities(Org) when is_binary(Org) ->
+    gen_server:call(?MODULE, {list_org_capabilities, Org}).
 
 %% @doc Call a capability by name over the DIRECT-DIAL data path: resolve
 %% the providers of `CapName' UNDER `Org' specifically (their
@@ -189,6 +231,9 @@ handle_call(publish, _From, #state{capabilities = Caps,
 
 handle_call({lookup, CapName}, _From, S) ->
     {reply, {ok, do_resolve(CapName)}, S};
+
+handle_call({list_org_capabilities, Org}, _From, S) ->
+    {reply, {ok, do_list_org_capabilities(Org)}, S};
 
 handle_call(list, _From, #state{capabilities = Caps} = S) ->
     {reply, Caps, S};
@@ -335,6 +380,68 @@ resolve_with({ok, Pool}, {ok, Realm}, Org, CapName) ->
     resolve_at(Pool, Realm, Org, CapName);
 resolve_with(_Pool, _Realm, _Org, _CapName) ->
     [].
+
+do_list_org_capabilities(Org) ->
+    list_org_with(hecate_om_identity:macula_client(),
+                 hecate_om_identity:realm(), Org).
+
+list_org_with({ok, Pool}, {ok, Realm}, Org) ->
+    resolve_org_capabilities(Pool, Realm, Org);
+list_org_with(_Pool, _Realm, _Org) ->
+    [].
+
+%% @doc Every capability `Org' has advertised, under `Realm' — see
+%% moduledoc for why this is a client-side filter over
+%% `find_records_by_type', not a DHT-indexed query.
+-spec resolve_org_capabilities(pid(), binary(), binary()) -> [map()].
+resolve_org_capabilities(Pool, Realm, Org) ->
+    Pattern = org_capability_pattern(Realm, Org),
+    lists:filtermap(fun(R) -> decode_if_org_matches(R, Pattern) end,
+                    find_by_type(Pool)).
+
+%% `RealmHex/Org/*' -- the pattern every one of Org's advertisements'
+%% procedure_uri must match, in the SAME `RealmHex/Org/Name' shape
+%% `procedure_uri/3' builds (a wildcard trailing segment, matched via
+%% `macula_topic_pattern:matches/2').
+org_capability_pattern(Realm, Org) ->
+    [binary:encode_hex(Realm), Org, <<"*">>].
+
+find_by_type(Pool) ->
+    on_find_by_type(find_records_by_type(Pool)).
+
+find_records_by_type(Pool) ->
+    try macula:find_records_by_type(Pool, ?TYPE_PROCEDURE_ADVERTISEMENT)
+    catch _:_ -> {error, unreachable}
+    end.
+
+on_find_by_type({ok, Records}) -> Records;
+on_find_by_type(_Other)        -> [].
+
+decode_if_org_matches(Record, Pattern) ->
+    decode_verified_if_org_matches(macula_record:verify(Record), Record, Pattern).
+
+decode_verified_if_org_matches({ok, _Payload}, Record, Pattern) ->
+    try macula_record:read_procedure_advertisement(Record) of
+        #{procedure_uri := Uri} = Decoded ->
+            keep_if_matches(matches_org_pattern(Pattern, Uri), Decoded, Record)
+    catch _:_ ->
+        false
+    end;
+decode_verified_if_org_matches({error, _}, _Record, _Pattern) ->
+    false.
+
+%% @doc Whether `Uri' (a procedure_advertisement's own `procedure_uri'
+%% field) matches the `RealmHex/Org/*' `Pattern'. Split purely on `/' --
+%% `Uri''s own Name segment may itself contain `.' (`weather.get_forecast')
+%% but never `/', matching `procedure_uri/3''s own construction.
+-spec matches_org_pattern([binary()], binary()) -> boolean().
+matches_org_pattern(Pattern, Uri) ->
+    macula_topic_pattern:matches(Pattern, binary:split(Uri, <<"/">>, [global])).
+
+keep_if_matches(true, Decoded, Record) ->
+    {true, Decoded#{record => Record}};
+keep_if_matches(false, _Decoded, _Record) ->
+    false.
 
 %% Org-scoped first: as of advertise_one/7, a handler-bearing capability
 %% publishes BOTH the bare key (below) and an org-qualified one. Resolving
