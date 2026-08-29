@@ -131,11 +131,19 @@ the part that actually fixes staleness.
 
 **Discovery that scales past a crawl.** A one-time `find_records_by_type` call only sees
 what one relay locally holds — fine at ten entities, silently incomplete at thousands (see
-the corpus doc for the specific code comment this is drawn from). The subscription in step
-1, left running, doesn't have that ceiling: every live entity's own periodic republish
-(required to keep its own fact from expiring) is a fresh delivery to every subscriber,
-mesh-wide. If you use `find_records_by_type` at all, treat it as a warm-start for faster
-initial convergence, never as what completeness depends on.
+the corpus doc for the specific code comment this is drawn from). This is specific to
+`find_records_by_type` (a bulk, local-only listing of everything of one type) — it does NOT
+apply to exact-key resolution (`find_records`/`find_record`, what `hecate_om_capabilities`'s
+own `resolve_at`/`resolve_full` actually use to reach a specific capability by name): as of
+macula-station's current `macula_station_dht_handlers`, a local miss on an exact key falls
+back to a bounded multi-round FIND_VALUE walk toward the key's own custodians, dialing
+newly-discovered peers on demand. Don't conflate the two — "can I find every entity of a
+type" and "can I resolve one specific key" have genuinely different reach today, and only
+the first has this ceiling. The subscription in step 1, left running, doesn't have EITHER
+ceiling: every live entity's own periodic republish (required to keep its own fact from
+expiring) is a fresh delivery to every subscriber, mesh-wide. If you use
+`find_records_by_type` at all, treat it as a warm-start for faster initial convergence,
+never as what completeness depends on.
 
 **Staleness handling for free, from the same mechanism.** The entity that republishes to
 stay alive in the DHT is the same republish your Listener hears and your Policy re-admits.
