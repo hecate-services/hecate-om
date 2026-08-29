@@ -114,6 +114,17 @@ handle_request(Payload, Tag) ->
 %%% bucket, and a targeted call could be silently answered by either.
 %%% This proves live, against a real station, that a call naming one org
 %%% is answered ONLY by that org, every time, never the other.
+%%%
+%%% ⚠ Requires `macula' >= 10.13.1 (the `ensure_link/3' connection-reuse
+%%% fix -- see its CHANGELOG entry). This module's own dependency
+%%% (`rebar.config', `{macula, "~> 10.0"}') resolves whatever hex
+%%% currently serves, which lagged behind 10.13.1 as of this commit --
+%%% verified locally via a temporary `_checkouts/macula' symlink, not
+%%% yet runnable against this repo's real, hex-resolved dependency. If
+%%% this test fails with `{disconnected, {peer_closed, ...}}' on
+%%% `ToContoso' specifically (the second sequential `call_station' on
+%%% one pool), that is this exact, known, already-fixed-upstream gap --
+%%% bump the `macula' dep once 10.13.1+ is on hex, don't re-diagnose it.
 %%%===================================================================
 
 org_scoped_call_reaches_only_the_targeted_org_test_() ->
@@ -140,23 +151,23 @@ run_org_scoped() ->
     ok = advertise_org(PoolAcme, Realm, CapName, KpAcme, <<"acme">>, <<"acme">>),
     ok = advertise_org(PoolContoso, Realm, CapName, KpContoso, <<"contoso">>, <<"contoso">>),
 
-    %% ONE consumer pool per call, not one shared pool for both -- found
-    %% live 2026-08-29: a SECOND macula:call_station/7 on the same pool
-    %% against the same already-connected station fails with
-    %% `{disconnected, {peer_closed, "connection lost"}}', reproducibly,
-    %% REGARDLESS of which org or procedure is called (confirmed by
-    %% calling the same org twice in a row: 1st ok, 2nd fails the same
-    %% way). Genuinely unrelated to org-scoped dispatch -- a connection-
-    %% layer issue in macula's pool/link reuse, tracked separately; see
-    %% PLAN_ORG_SCOPED_DISPATCH_AND_WILDCARD_DISCOVERY.md's cleanup slice
-    %% for the follow-up. Two pools sidesteps it without weakening what
-    %% THIS test proves (org-targeted CALL dispatch correctness).
-    ConsumerKpAcme = macula_identity:generate(#{puzzle => true}),
-    {ok, ConsumerPoolAcme} = macula_client:connect([?SEED], #{identity => ConsumerKpAcme}),
-    ok = wait_healthy(ConsumerPoolAcme, 100),
-    ConsumerKpContoso = macula_identity:generate(#{puzzle => true}),
-    {ok, ConsumerPoolContoso} = macula_client:connect([?SEED], #{identity => ConsumerKpContoso}),
-    ok = wait_healthy(ConsumerPoolContoso, 100),
+    %% ONE shared consumer pool for both calls -- this used to need two
+    %% separate pools (see git history) to sidestep a macula connection-
+    %% layer bug: a SECOND macula:call_station/7 on one pool against the
+    %% same already-connected station failed with `{disconnected,
+    %% {peer_closed, "connection lost"}}', reproducibly, regardless of
+    %% org/procedure. Root cause: `macula_client:ensure_link/3' keyed its
+    %% link table by the literal seed STRING, so a direct-dial call
+    %% naming a station by its resolved `quic://...' URL never matched
+    %% the SAME station already connected under this pool's own `?SEED'
+    %% string, and dialed a genuinely redundant second connection that
+    %% the station then closed one half of. Fixed in macula (reuse an
+    %% existing link by `expected_node_id' before dialing fresh on a
+    %% literal-key miss) -- this test reverted to one pool specifically
+    %% BECAUSE that fix is what makes it safe to.
+    ConsumerKp = macula_identity:generate(#{puzzle => true}),
+    {ok, ConsumerPool} = macula_client:connect([?SEED], #{identity => ConsumerKp}),
+    ok = wait_healthy(ConsumerPool, 100),
 
     %% Give DHT propagation a moment past the initial writes -- same
     %% retry-tolerant spirit as macula_direct_dial's own resolve loop,
@@ -166,16 +177,15 @@ run_org_scoped() ->
     timer:sleep(2_000),
 
     ToAcme = hecate_om_capabilities:call_capability(
-               ConsumerPoolAcme, Realm, <<"acme">>, CapName,
+               ConsumerPool, Realm, <<"acme">>, CapName,
                #{<<"who">> => <<"?">>}, 15_000, #{}),
     ToContoso = hecate_om_capabilities:call_capability(
-                  ConsumerPoolContoso, Realm, <<"contoso">>, CapName,
+                  ConsumerPool, Realm, <<"contoso">>, CapName,
                   #{<<"who">> => <<"?">>}, 15_000, #{}),
 
     catch macula_client:close(PoolAcme),
     catch macula_client:close(PoolContoso),
-    catch macula_client:close(ConsumerPoolAcme),
-    catch macula_client:close(ConsumerPoolContoso),
+    catch macula_client:close(ConsumerPool),
 
     ?assertMatch({ok, #{answered_by := <<"acme">>}}, ToAcme),
     ?assertMatch({ok, #{answered_by := <<"contoso">>}}, ToContoso).
