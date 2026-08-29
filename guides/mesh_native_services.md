@@ -485,6 +485,12 @@ and non-blocking.
   guide assumes.
 - [`identity_model.md`](identity_model.md) — why a service has its own
   identity, not the operator's.
+- [`read_model_services.md`](read_model_services.md) — if your
+  subscription (chapter 3) is feeding a queryable local read model rather
+  than just triggering a side effect: the Listener/Policy/Projection split
+  that keeps it from serving stale entries forever, and the discovery-at-
+  scale reasoning behind relying on the subscription rather than a
+  `find_records_by_type` crawl.
 - `hecate-services/hecate-tube` — the fullest real exemplar of a
   service using every primitive in this guide, including the two
   chapters 4–5 note aren't wrapped yet (streaming, and content's
