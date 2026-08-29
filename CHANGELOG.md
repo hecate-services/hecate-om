@@ -3,6 +3,47 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.0] - 2026-08-29
+
+### Fixed
+
+- **Shared-station capability dispatch**: two orgs advertising the same bare
+  capability name from the same relay station collided on
+  `macula_remote_advertise_registry`'s single-provider-per-bare-name
+  invariant — whichever org's 30s republish landed last silently answered
+  every targeted `call_capability`, regardless of `Org`. `advertise_one/7`
+  now makes two independent `advertise_direct` registrations per
+  handler-bearing capability (bare name, plus `Org/Name` as a genuinely
+  distinct wire-level registration); `resolve_full/4` tags each resolved
+  provider with the wire-level procedure string that actually matched, and
+  `call_capability` CALLs with that string, not the raw capability name.
+  Live-verified against `station-de-frankfurt.macula.io`.
+- `find/2`'s DHT resolution had no retry margin against write-propagation
+  lag, unlike `macula_direct_dial`'s own internal resolution — mirrored its
+  retry budget (50 x 100ms).
+- Advertisements now carry a `ttl_ms` proportioned to the 30s republish
+  interval instead of the ~48h envelope default, live effect confirmed
+  after bumping the `macula` dependency past the `adv_opts/1` fix below.
+
+### Added
+
+- `list_org_capabilities/1` / `resolve_org_capabilities/3` — browse every
+  capability an org has advertised, without knowing any capability name in
+  advance. Client-side filter over `macula:find_records_by_type/2`
+  (matched via `macula`'s new `macula_topic_pattern`), same local-relay-view,
+  warm-start-only semantics `read_model_services.md` already documents for
+  that call.
+
+### Changed
+
+- Bumped `macula` dependency 10.10.0 -> 10.13.1: `macula_direct_dial:adv_opts/1`
+  no longer silently drops `ttl_ms`; `macula_client`'s connection pool no
+  longer dials a redundant duplicate connection to a station it already
+  holds a live link to under a different seed spelling (was reproducible,
+  live, as literally the second `call_station` from one pool to the same
+  station); `macula_topic_pattern` and station-local wildcard pubsub
+  subscriptions added. See macula's own CHANGELOG [10.11.1]-[10.13.1].
+
 ## [0.15.1] - 2026-08-27
 
 ### Fixed
