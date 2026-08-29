@@ -97,8 +97,103 @@ healthy_or_wait(_Status, Pool, N) ->
     wait_healthy(Pool, N - 1).
 
 %% macula_response callbacks -- a trivial echo, invoked by the station
-%% on a real inbound CALL.
-init(_Args) -> {ok, []}.
+%% on a real inbound CALL. `Args' (a binary tag) rides through into every
+%% reply, which is how org_scoped_call_reaches_only_the_targeted_org_test
+%% below tells "acme answered" from "contoso answered" apart live,
+%% without needing two separate callback modules for one shared shape.
+init(Args) -> {ok, Args}.
 
-handle_request(Payload, State) ->
-    {reply, #{<<"echo">> => Payload}, State}.
+handle_request(Payload, Tag) ->
+    {reply, #{<<"answered_by">> => Tag, <<"echo">> => Payload}, Tag}.
+
+%%%===================================================================
+%%% Two orgs, same bare capability name -- the actual fix this module
+%%% exists to prove. Before it, `Org' was accepted by call_capability/5,7
+%%% but never reached key derivation (resolve_at/4, resolve_full/4 both
+%%% ignored it) -- both orgs' advertisements landed in the same DHT
+%%% bucket, and a targeted call could be silently answered by either.
+%%% This proves live, against a real station, that a call naming one org
+%%% is answered ONLY by that org, every time, never the other.
+%%%===================================================================
+
+org_scoped_call_reaches_only_the_targeted_org_test_() ->
+    {timeout, 30, fun run_org_scoped/0}.
+
+run_org_scoped() ->
+    {ok, _} = application:ensure_all_started(macula),
+    Realm = crypto:strong_rand_bytes(32),
+    CapName = <<"hecate_om_live_test.org_scoped_echo">>,
+
+    KpAcme    = macula_identity:generate(#{puzzle => true}),
+    KpContoso = macula_identity:generate(#{puzzle => true}),
+    {ok, PoolAcme}    = macula_client:connect([?SEED], #{identity => KpAcme}),
+    {ok, PoolContoso} = macula_client:connect([?SEED], #{identity => KpContoso}),
+    ok = wait_healthy(PoolAcme, 100),
+    ok = wait_healthy(PoolContoso, 100),
+
+    %% Each provider does exactly what advertise_one/7's handler-bearing
+    %% clause now does: register the wire-level handler under the bare
+    %% name (advertise_direct), AND separately publish an org-qualified
+    %% discovery record (build_advertisement + put_record) at the same
+    %% serving station -- reusing the exact same exported functions, not
+    %% a hand-rolled substitute for them.
+    ok = advertise_org(PoolAcme, Realm, CapName, KpAcme, <<"acme">>, <<"acme">>),
+    ok = advertise_org(PoolContoso, Realm, CapName, KpContoso, <<"contoso">>, <<"contoso">>),
+
+    %% ONE consumer pool per call, not one shared pool for both -- found
+    %% live 2026-08-29: a SECOND macula:call_station/7 on the same pool
+    %% against the same already-connected station fails with
+    %% `{disconnected, {peer_closed, "connection lost"}}', reproducibly,
+    %% REGARDLESS of which org or procedure is called (confirmed by
+    %% calling the same org twice in a row: 1st ok, 2nd fails the same
+    %% way). Genuinely unrelated to org-scoped dispatch -- a connection-
+    %% layer issue in macula's pool/link reuse, tracked separately; see
+    %% PLAN_ORG_SCOPED_DISPATCH_AND_WILDCARD_DISCOVERY.md's cleanup slice
+    %% for the follow-up. Two pools sidesteps it without weakening what
+    %% THIS test proves (org-targeted CALL dispatch correctness).
+    ConsumerKpAcme = macula_identity:generate(#{puzzle => true}),
+    {ok, ConsumerPoolAcme} = macula_client:connect([?SEED], #{identity => ConsumerKpAcme}),
+    ok = wait_healthy(ConsumerPoolAcme, 100),
+    ConsumerKpContoso = macula_identity:generate(#{puzzle => true}),
+    {ok, ConsumerPoolContoso} = macula_client:connect([?SEED], #{identity => ConsumerKpContoso}),
+    ok = wait_healthy(ConsumerPoolContoso, 100),
+
+    %% Give DHT propagation a moment past the initial writes -- same
+    %% retry-tolerant spirit as macula_direct_dial's own resolve loop,
+    %% just a fixed pre-sleep here since this test issues both calls
+    %% itself rather than looping (find/2's own retry, added 2026-08-29,
+    %% is the safety net if this margin is ever too tight).
+    timer:sleep(2_000),
+
+    ToAcme = hecate_om_capabilities:call_capability(
+               ConsumerPoolAcme, Realm, <<"acme">>, CapName,
+               #{<<"who">> => <<"?">>}, 15_000, #{}),
+    ToContoso = hecate_om_capabilities:call_capability(
+                  ConsumerPoolContoso, Realm, <<"contoso">>, CapName,
+                  #{<<"who">> => <<"?">>}, 15_000, #{}),
+
+    catch macula_client:close(PoolAcme),
+    catch macula_client:close(PoolContoso),
+    catch macula_client:close(ConsumerPoolAcme),
+    catch macula_client:close(ConsumerPoolContoso),
+
+    ?assertMatch({ok, #{answered_by := <<"acme">>}}, ToAcme),
+    ?assertMatch({ok, #{answered_by := <<"contoso">>}}, ToContoso).
+
+%% Mirrors advertise_one/7's handler-bearing clause (2026-08-29): TWO
+%% independent advertise_direct calls, bare name and org_procedure(Org,
+%% CapName), each registering its own wire-level handler AND publishing
+%% its own DHT record in one call -- no separate build_advertisement/
+%% put_record step needed for the org-qualified record any more, since
+%% discovery_uri/2 (RealmHex/Procedure) and procedure_uri/3
+%% (RealmHex/Org/Name) produce the identical key when
+%% Procedure = org_procedure(Org, Name).
+advertise_org(Pool, Realm, CapName, KeyPair, Org, ReplyTag) ->
+    {ok, SupBare} = macula_response:advertise_direct(Pool, Realm, CapName,
+                                                      ?MODULE, ReplyTag, KeyPair, #{}),
+    unlink(SupBare),
+    OrgProcedure = hecate_om_capabilities:org_procedure(Org, CapName),
+    {ok, SupOrg} = macula_response:advertise_direct(Pool, Realm, OrgProcedure,
+                                                     ?MODULE, ReplyTag, KeyPair, #{}),
+    unlink(SupOrg),
+    ok.

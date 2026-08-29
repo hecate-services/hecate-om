@@ -75,6 +75,154 @@ decode_resolved_drops_tampered_and_foreign_records_test() ->
     ?assertEqual([#{advertiser => macula_identity:public(Kp),
                     serving_station => St}], Got).
 
+%%% Org-scoped discovery — two orgs advertising the same bare capability
+%%% name must resolve to genuinely distinct DHT buckets, so a caller
+%%% targeting one org can never be silently answered by the other.
+
+%% The property the whole fix depends on: two different orgs (or an org
+%% vs. the bare/any-provider key) derive DIFFERENT storage keys for the
+%% identical capability name. Before this fix, Org was accepted by
+%% call_capability/5,7 but never reached key derivation at all — every
+%% org collided on the same bare key.
+discovery_key_org_is_distinct_per_org_and_from_bare_test() ->
+    R    = realm(),
+    Name = <<"svc.do">>,
+    Bare   = hecate_om_capabilities:discovery_key(R, Name),
+    Acme   = hecate_om_capabilities:discovery_key_org(R, <<"acme">>, Name),
+    Contoso = hecate_om_capabilities:discovery_key_org(R, <<"contoso">>, Name),
+    ?assertNotEqual(Bare, Acme),
+    ?assertNotEqual(Bare, Contoso),
+    ?assertNotEqual(Acme, Contoso).
+
+%% Read/write agreement: the key a consumer derives via discovery_key_org/3
+%% must be EXACTLY the key macula_record:storage_key/1 computes for a
+%% record built via build_advertisement/5 with the same (Realm, Org,
+%% Name) — otherwise the org-qualified record advertise_one/7 now
+%% publishes would be unfindable by the org-scoped lookup that's
+%% supposed to find it, and the fix would silently do nothing.
+discovery_key_org_matches_what_gets_published_under_it_test() ->
+    Kp   = macula_identity:generate(),
+    R    = realm(),
+    St   = station(),
+    Org  = <<"acme">>,
+    Name = <<"svc.do">>,
+    Rec = hecate_om_capabilities:build_advertisement(Kp, R, Org, cap(Name), St),
+    ?assertEqual(hecate_om_capabilities:discovery_key_org(R, Org, Name),
+                 macula_record:storage_key(Rec)).
+
+%% Pure decision logic: a non-empty org-scoped result is returned as-is —
+%% the fallback branch (which would need a real find/2 mesh call) is
+%% never reached, matching Erlang's own clause selection, not something
+%% this test has to prove separately.
+org_scoped_or_any_prefers_org_scoped_when_present_test() ->
+    OrgScoped = [#{advertiser => <<1:256>>, serving_station => <<2:256>>}],
+    ?assertEqual(OrgScoped,
+                 hecate_om_capabilities:org_scoped_or_any(
+                   OrgScoped, unused_pool, unused_realm, unused_cap)).
+
+%% Empty org-scoped result: falls back to the bare-key resolution path
+%% rather than reporting "no provider" outright. Uses the same zero-seed
+%% real-pool technique as the live_pool_* tests above — proves the
+%% fallback branch reaches real code (discovery_key/2 + find/2 +
+%% resolve_records/1) and degrades to [] without crashing, rather than
+%% proving a non-empty result (which needs a real station).
+org_scoped_or_any_falls_back_when_org_scoped_is_empty_test_() ->
+    {timeout, 15,
+     fun() ->
+        {ok, _} = application:ensure_all_started(macula),
+        {ok, Pool} = macula_client:connect([], #{}),
+        Got = hecate_om_capabilities:org_scoped_or_any(
+                [], Pool, realm(), <<"svc.do">>),
+        ?assertEqual([], Got),
+        catch macula_client:close(Pool)
+     end}.
+
+%%% Org-scoped wire dispatch (2026-08-29) — the shared-station fix. Two
+%%% orgs advertising the same bare capability name from the SAME station
+%%% used to collide on macula_remote_advertise_registry's single-provider-
+%%% per-bare-name invariant; a targeted call could be silently answered
+%%% by whichever org's registration was most recent. Fixed by CALLing
+%%% with a per-org wire-level procedure string, not the bare name.
+
+org_procedure_is_org_slash_name_test() ->
+    ?assertEqual(<<"acme/svc.do">>,
+                 hecate_om_capabilities:org_procedure(<<"acme">>, <<"svc.do">>)),
+    ?assertNotEqual(
+       hecate_om_capabilities:org_procedure(<<"acme">>, <<"svc.do">>),
+       hecate_om_capabilities:org_procedure(<<"contoso">>, <<"svc.do">>)).
+
+%% The property advertise_one/7's dual-advertise depends on: publishing
+%% under org_procedure(Org, Name) as the wire-level Procedure lands the
+%% DHT record at EXACTLY discovery_key_org/3's key, because
+%% macula_direct_dial:discovery_uri/2 (RealmHex/Procedure) and
+%% procedure_uri/3 (RealmHex/Org/Name) produce the identical string when
+%% Procedure = org_procedure(Org, Name). If this ever stopped being true,
+%% the org-qualified advertise_direct call would publish somewhere the
+%% org-scoped resolver can never find.
+org_procedure_matches_procedure_uri_when_realm_prefixed_test() ->
+    R    = realm(),
+    Org  = <<"acme">>,
+    Name = <<"svc.do">>,
+    DiscoveryUriShape = <<(binary:encode_hex(R))/binary, "/",
+                          (hecate_om_capabilities:org_procedure(Org, Name))/binary>>,
+    ?assertEqual(hecate_om_capabilities:procedure_uri(R, Org, Name),
+                 DiscoveryUriShape).
+
+%% org_scoped_full_or_any/5's whole job: tag each provider with the
+%% wire-level procedure the CALL must use. An org-scoped hit is tagged
+%% org_procedure(Org, CapName) -- never CapName alone -- so dial_provider
+%% can only ever reach that org's own registration.
+org_scoped_full_or_any_tags_org_scoped_hits_with_the_org_procedure_test() ->
+    OrgScoped = [#{advertiser => <<1:256>>, serving_station => <<2:256>>,
+                  record => ignored}],
+    Got = hecate_om_capabilities:org_scoped_full_or_any(
+            OrgScoped, unused_pool, unused_realm, <<"acme">>, <<"svc.do">>),
+    ?assertEqual([#{advertiser => <<1:256>>, serving_station => <<2:256>>,
+                    record => ignored, procedure => <<"acme/svc.do">>}],
+                Got).
+
+%% Empty org-scoped result falls back to bare-key resolution AND tags the
+%% fallback hits with the bare CapName, never org_procedure/2 -- a
+%% fallback hit's provider may not even be the targeted org (that's the
+%% point of the fallback), so tagging it org-qualified would target a
+%% registration that provider never made.
+org_scoped_full_or_any_falls_back_and_tags_with_bare_name_test_() ->
+    {timeout, 15,
+     fun() ->
+        {ok, _} = application:ensure_all_started(macula),
+        {ok, Pool} = macula_client:connect([], #{}),
+        Got = hecate_om_capabilities:org_scoped_full_or_any(
+                [], Pool, realm(), <<"acme">>, <<"svc.do">>),
+        ?assertEqual([], Got),
+        catch macula_client:close(Pool)
+     end}.
+
+%% advertise_opts/1 always carries ttl_ms proportioned to the republish
+%% interval, with or without a cert chain -- the property slice 6 (TTL
+%% fix) depends on: a dead service's advertisement should age out in
+%% minutes, not the ~48h envelope default.
+advertise_opts_always_carries_a_proportioned_ttl_test() ->
+    ?assertMatch(#{ttl_ms := Ttl} when is_integer(Ttl) andalso Ttl > 0,
+                 hecate_om_capabilities:advertise_opts({error, no_chain})),
+    ?assertMatch(#{ttl_ms := _, cert_chain := <<"pem">>},
+                 hecate_om_capabilities:advertise_opts({ok, <<"pem">>})).
+
+%% End-to-end proof (pure, no mesh): the record-only path's ttl_ms
+%% actually reaches the signed record's expires_at -- this path builds
+%% via macula_record:procedure_advertisement/4 directly, so it is NOT
+%% affected by the macula_direct_dial:adv_opts/1 forwarding gap the
+%% handler-bearing path depends on macula shipping past 10.11.1 for.
+build_advertisement_honors_a_proportioned_ttl_test() ->
+    Kp   = macula_identity:generate(),
+    R    = realm(),
+    St   = station(),
+    Opts = hecate_om_capabilities:advertise_opts({error, no_chain}),
+    #{ttl_ms := TtlMs} = Opts,
+    Rec = hecate_om_capabilities:build_advertisement(
+            Kp, R, <<"acme">>, cap(<<"svc.do">>), St, Opts),
+    ?assertEqual(TtlMs,
+                 macula_record:expires_at(Rec) - macula_record:created_at(Rec)).
+
 station_url_brackets_ipv6_only_test() ->
     ?assertEqual(<<"quic://[::1]:4433">>,
                  hecate_om_capabilities:station_url(<<"::1">>, 4433)),
