@@ -10,12 +10,11 @@
 # real test coverage that nothing was running -- CI only ever called `rebar3 ct`,
 # so a regression in any of it would have stayed green.
 #
-# Runs on the glibc erlang image, matching local dev (OTP 28), where macula
-# resolves a prebuilt QUIC NIF and no Rust toolchain is needed. cmake, a C++
-# toolchain, and the codec dev libs ARE still needed: barrel_docdb pulls in
+# Runs on the glibc erlang image, matching local dev (OTP 28). cmake, a C++
+# toolchain, and the codec dev libs are needed: barrel_docdb pulls in
 # rocksdb, which builds its NIF from source via CMake -- the base erlang
-# image ships none of it. This was broken in two stages, both silent because
-# nothing checked `gh run view` after the pushes that caused them:
+# image ships none of it. This was broken in three stages, all silent
+# because nothing checked `gh run view` after the pushes that caused them:
 #   1. `cmake: not found`, failing at the dependency-compile step inside
 #      `rebar3 lint`, since barrel_docdb was added.
 #   2. Once cmake was installed: rocksdb's CMakeLists auto-detects system
@@ -26,6 +25,17 @@
 #      blob compression type Snappy is not available"). lz4/zstd/bz2 go
 #      through the same silent auto-detect, so all four dev libs are
 #      installed here, not just the one that happened to be exercised.
+#   3. This job previously claimed "macula resolves a prebuilt QUIC NIF and
+#      no Rust toolchain is needed" -- true for the QUIC NIF's own
+#      precompiled-download path, but macula_cbor_nif (macula's CBOR wire
+#      codec, no Erlang fallback by design) always builds from source, and
+#      macula's own build script silently skipped it with cargo missing
+#      (fixed separately in macula-io/macula 10.14.3, but that alone
+#      doesn't put cargo in THIS container). `rebar3 compile` and `rebar3
+#      lint` both went green with the NIF never built; `rebar3 eunit` then
+#      failed 7 tests with nif_not_loaded, the same silent-then-late
+#      pattern as stage 2. Installing Rust here is the actual fix, not a
+#      newer macula alone.
 
 name: lint-and-test
 
@@ -43,6 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: apt-get update && apt-get install -y --no-install-recommends cmake build-essential libsnappy-dev liblz4-dev libzstd-dev libbz2-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - run: rebar3 lint
       - run: rebar3 eunit
       # hecate_service_template_SUITE shells out to `rebar3 new', so rebar3 must
@@ -64,4 +76,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: apt-get update && apt-get install -y --no-install-recommends cmake build-essential libsnappy-dev liblz4-dev libzstd-dev libbz2-dev
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
       - run: rebar3 as live_test eunit --dir test_live
