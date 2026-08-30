@@ -63,11 +63,27 @@ jobs:
 
   # test_live/*.erl hit a real demo-fleet station (station-de-frankfurt.macula.io)
   # over the network -- genuinely valuable (they've caught three real bugs no
-  # unit test could have), but the demo fleet is documented, disposable dev
-  # infra with no uptime guarantee, so this job must never block a merge on a
-  # station blip. continue-on-error surfaces a failure (this job goes yellow,
-  # visible in the run) without turning the check red. See rebar.config's
-  # `live_test` profile and any test_live/*.erl moduledoc for the full reasoning.
+  # unit test could have). continue-on-error surfaces a failure (this job goes
+  # yellow, visible in the run) without turning the check red.
+  #
+  # ⚠ Confirmed 2026-08-31: this job's real failure mode is not "occasional
+  # station blip" (what this comment used to say) -- it fails 100% of the
+  # time, deterministically, on every run, for a reason no station-side fix
+  # touches: `station-de-frankfurt.macula.io` has ONLY an AAAA record
+  # (`dig AAAA` -> 2a01:7e01::f03c:94ff:fe22:719e; `dig A` -> nothing), and
+  # GitHub-hosted runners (ubuntu-latest, incl. this container) have no IPv6
+  # egress at all -- a platform limitation, not something this repo's code
+  # or workflow config can route around. `wait_healthy/2` in every
+  # test_live/*.erl module times out waiting for `healthy_links > 0` because
+  # the QUIC connect can never even reach the station, not because it's
+  # unhealthy. continue-on-error is doing real work here and should stay --
+  # but don't read a red live-mesh-tests run as "the station had a blip";
+  # read it as "expected on a GitHub-hosted runner, uninformative until
+  # this runs somewhere with IPv6 egress." A self-hosted runner (this
+  # user's own boxes are already IPv6-capable) or an IPv4 listener added
+  # station-side would both fix it for real; neither is a workflow-file
+  # change. See rebar.config's `live_test` profile and any
+  # test_live/*.erl moduledoc for the rest of the reasoning.
   live-mesh-tests:
     runs-on: ubuntu-latest
     container:
