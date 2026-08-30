@@ -335,7 +335,10 @@ reuse_sup_opts(undefined)            -> #{};
 reuse_sup_opts(Sup) when is_pid(Sup) -> #{reuse_sup => Sup}.
 
 advertised({ok, Sup}, Name, Sups)   -> Sups#{Name => Sup};
-advertised({error, _Reason}, _Name, Sups) -> Sups.
+advertised({error, Reason}, Name, Sups) ->
+    logger:warning("hecate_om_capabilities: advertise_direct for ~s failed: ~p",
+                   [Name, Reason]),
+    Sups.
 
 advertise_record_only({ok, Station}, Pool, KeyPair, Realm, Org, CertOpts, Cap) ->
     put_advertisement(Pool, build_advertisement(KeyPair, Realm, Org, Cap,
@@ -344,10 +347,24 @@ advertise_record_only({error, no_station}, _Pool, _KeyPair, _Realm, _Org,
                       _CertOpts, _Cap) ->
     ok.
 
+%% `macula:put_record/2' returns `ok | {error, term()}' -- both branches
+%% were previously discarded outright (the old `try ... catch _:_ -> ok
+%% end' only guarded against an exception, never inspected a plain
+%% `{error, _}' return at all), so a rejected or failed record-only
+%% advertisement had no trace anywhere. Logged now, matching
+%% `advertised/3''s own fix -- this is the legacy no-handler path
+%% (`advertise_one/7''s second clause), the handler-bearing path's own
+%% failures are `advertised/3''s concern above.
 put_advertisement(Pool, Record) ->
-    try macula:put_record(Pool, Record)
-    catch _:_ -> ok
-    end.
+    log_put_result(try macula:put_record(Pool, Record)
+                    catch Class:Reason -> {error, {Class, Reason}}
+                    end).
+
+log_put_result(ok) -> ok;
+log_put_result({error, Reason}) ->
+    logger:warning("hecate_om_capabilities: put_record (record-only advertisement) failed: ~p",
+                   [Reason]),
+    ok.
 
 %% One station this service is reachable through, from the pool's
 %% connected links. Slice 2 advertises ONE serving station per provider

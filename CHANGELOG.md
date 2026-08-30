@@ -3,6 +3,32 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.1] - 2026-08-31
+
+### Fixed
+
+- **Silent advertise failures**: `hecate_om_capabilities:advertised/3`
+  discarded `advertise_direct`'s `{error, Reason}` outright, and
+  `put_advertisement/2`'s `try ... catch _:_ -> ok end` discarded BOTH a
+  plain `{error, _}` return from `macula:put_record/2` (never pattern-matched
+  at all, not just the exception guard) and any real exception, all with no
+  logging anywhere. Combined with `register/1`'s `handle_call` always
+  replying `ok` regardless of what `do_advertise` actually did, a service
+  could run "healthy" indefinitely with its capability never actually
+  reaching the mesh's DHT and nothing anywhere to indicate why. Also a
+  correctness gap against this repo's own CLAUDE.md: a `try/catch` here is
+  only justified when it adds monitoring value neither branch did.
+  Both paths now `logger:warning/2` the real reason
+  (`hecate_om_capabilities: advertise_direct for ~s failed: ~p` /
+  `... put_record (record-only advertisement) failed: ~p`). Found live
+  investigating why `hecate_stations.list_stations` was unreachable
+  through the mesh: confirmed via `macula-cli dht find-records-by-type`
+  that its advertisement genuinely never reached the DHT, but nothing in
+  the service's own logs said why until this fix — existing tests already
+  exercise the failure path and now show a real reason (`no_healthy_station`
+  in the test fixture's case) instead of silence. 30/30 existing tests
+  still pass.
+
 ## [0.16.0] - 2026-08-29
 
 ### Fixed
