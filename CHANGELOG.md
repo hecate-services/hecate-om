@@ -3,6 +3,18 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.4] - 2026-08-31
+
+### Fixed
+
+- `hecate_om_capabilities`: `procedure_uri/3`, `discovery_key/2`, and
+  `org_capability_pattern/2` used `binary:encode_hex(Realm)` (lowercase) while
+  the live fleet's DHT `procedure_advertisement` records carry uppercase hex.
+  Since `SHA-256(uppercase) != SHA-256(lowercase)`, direct-dial resolvers
+  looked up the wrong DHT key. Changed all three call sites to
+  `binary:encode_hex(Realm, uppercase)`, matching `macula_direct_dial:discovery_uri/2`
+  (fixed in macula 10.14.4) and macula-go/macula-rust/macula-dotnet.
+
 ## [0.16.3] - 2026-08-31
 
 ### Fixed
