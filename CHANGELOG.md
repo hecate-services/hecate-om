@@ -3,6 +3,30 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.2] - 2026-08-31
+
+### Fixed
+
+- **Second silent-failure path in the same area as 0.16.1**:
+  `advertise_with/7`'s fallback clause (pool/keypair/realm not all ready)
+  had NO logging at all -- worse than 0.16.1's bug, since that one at
+  least implies `advertise_direct` got called. This clause's own comment
+  assumed a "transient mesh gap" resolved within a few republish ticks;
+  a genuinely stuck pool or identity means this clause fires forever,
+  silently, with capabilities never advertised and nothing anywhere to
+  say why. Deployed 0.16.1 to `hecate-stations` (beam03) specifically to
+  observe this in production and found exactly this: 0.16.1's new
+  logging never fired at all, and `hecate_stations.list_stations` still
+  wasn't in the DHT (confirmed via `macula-cli dht find-records-by-type`)
+  -- meaning the failure was happening one level earlier than 0.16.1
+  could see.
+  Now logs the specific reason for each of pool/keypair/realm
+  (`hecate_om_capabilities: advertise skipped, not all of pool/keypair/
+  realm are ready yet: {PoolError, KeyPairError, RealmError}`), throttled
+  to once per distinct reason triple (a process-dictionary-scoped gate)
+  so a persistent boot problem doesn't spam a warning every 30s forever.
+  30/30 capabilities tests + 82/82 full suite pass, dialyzer clean.
+
 ## [0.16.1] - 2026-08-31
 
 ### Fixed

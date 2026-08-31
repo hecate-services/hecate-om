@@ -120,6 +120,10 @@
 %% make `list_org_capabilities/1' silently see nothing.
 -define(TYPE_PROCEDURE_ADVERTISEMENT, 6).
 
+%% Process dictionary key for advertise_with/7's log-once throttle. Scoped
+%% to this gen_server's own process, not shared/global state.
+-define(ADVERTISE_GATE_LOG_KEY, hecate_om_capabilities_advertise_gate_reason).
+
 %% Re-assert advertisements this often. Records outlive one interval;
 %% the tick also retries the initial write until the pool + a station
 %% link are present.
@@ -278,8 +282,39 @@ advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, CertOpts, Caps, Sups
 %% Missing pool / keypair / realm: cannot reach the mesh or sign. No-op;
 %% the timer retries once all three are present. Existing sups (if any)
 %% are kept as-is — a transient mesh gap does not invalidate them.
-advertise_with(_Pool, _KeyPair, _Realm, _Org, _CertOpts, _Caps, Sups) ->
+%%
+%% This clause used to be silent, matching advertised/3's old bug: a
+%% genuinely stuck pool/identity (not a transient few-tick gap, the
+%% comment's original assumption) meant NO advertise attempt is EVER
+%% actually made, forever, with no trace anywhere -- worse than
+%% advertised/3's bug, since that one at least implies advertise_direct
+%% got called. Logged now, throttled to once per distinct reason
+%% (see log_advertise_gate_once/1) so a genuinely stuck boot doesn't
+%% spam a warning every 30s republish tick forever.
+advertise_with(PoolR, KeyPairR, RealmR, _Org, _CertOpts, _Caps, Sups) ->
+    log_advertise_gate_once({error_of(PoolR), error_of(KeyPairR), error_of(RealmR)}),
     Sups.
+
+error_of({ok, _}) -> ok;
+error_of({error, Reason}) -> Reason.
+
+%% Logs at most once per distinct (Pool, KeyPair, Realm) error triple per
+%% process lifetime -- a persistent boot problem calls advertise_with/7
+%% every 30s forever, and an unthrottled warning there is exactly the
+%% kind of self-inflicted log spam that gets a real signal muted. A
+%% CHANGED triple (e.g. pool recovers, keypair still missing) logs again,
+%% since that's new information.
+log_advertise_gate_once(Reasons) ->
+    case get(?ADVERTISE_GATE_LOG_KEY) of
+        Reasons -> ok;
+        _ ->
+            put(?ADVERTISE_GATE_LOG_KEY, Reasons),
+            logger:warning(
+              "hecate_om_capabilities: advertise skipped, not all of "
+              "pool/keypair/realm are ready yet: ~p (pool_error, "
+              "keypair_error, realm_error -- 'ok' means that one is fine)",
+              [Reasons])
+    end.
 
 %% @doc Whether `Cap' carries a handler (and so should be advertised via
 %% `advertise_direct', not just written to the DHT as a bare discovery
