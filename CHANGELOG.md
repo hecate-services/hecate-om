@@ -3,6 +3,33 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.3] - 2026-08-31
+
+### Fixed
+
+- **The actual root cause**, found by deploying 0.16.2's new logging to
+  `hecate-stations` (beam03) and reading it: `{ok, no_keypair, ok}` --
+  pool and realm were both fine, but no stable signing keypair.
+  `identity_key_path` was simply absent from `hecate-stations`' own
+  `config/sys.config.src` (and, worse, from the scaffold template every
+  service is generated from -- `priv/templates/hecate_service/sys.config.src`,
+  fixed here too). Without it, `hecate_om_identity:load_keypair/0` returns
+  `undefined` forever (the self-heal, auto-generate-and-persist path only
+  fires when a path IS configured but the file at it fails to load), so
+  `keypair/0` stays `{error, no_keypair}` permanently, and
+  `hecate_om_capabilities:advertise_with/7` no-ops on every republish tick
+  by design ("an ephemeral service cannot sign and is correctly not
+  advertised"). This is the exact failure mode this module's own comment
+  already named as a known recurring issue (hecate-tube hit it before) --
+  it just wasn't caught at generation time.
+  Both the template and `hecate-stations`' own config now set
+  `identity_key_path` to `/etc/hecate/secrets/identity.key`, the same
+  already-mounted secrets volume `service_cert_path` uses -- no new
+  infrastructure needed. Added `sys_config_configures_a_stable_identity`
+  to `hecate_service_template_SUITE` so a future template regeneration
+  can't silently drop this again; confirmed RED without the template fix,
+  GREEN with it. 82/82 eunit + 15/15 CT pass, dialyzer clean.
+
 ## [0.16.2] - 2026-08-31
 
 ### Fixed

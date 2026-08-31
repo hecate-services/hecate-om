@@ -5,6 +5,16 @@
 [
     {hecate_om, [
         {service_cert_path, "/etc/hecate/secrets/service-cert.pem"},
+        %% Without this, hecate_om_identity:load_keypair/0 returns `undefined`
+        %% forever and keypair/0 stays {error, no_keypair} -- a service that
+        %% declares a handler-bearing capability() then silently never
+        %% advertises it, on every republish tick, permanently ("an
+        %% ephemeral service cannot sign and is correctly not advertised",
+        %% hecate_om_capabilities's own moduledoc). Confirmed live 2026-08-31
+        %% on a service generated from an earlier copy of this template that
+        %% lacked this line. Point it at the same mounted secrets volume
+        %% service_cert_path already uses -- no new infrastructure needed.
+        {identity_key_path, "/etc/hecate/secrets/identity.key"},
         {health_port,       ${HECATE_HEALTH_PORT}},
         {capability_topic,  <<"_mesh.cap.">>},
         %% THE REALM IS AN APPLICATION ENV, NOT A SHELL VARIABLE, and this file

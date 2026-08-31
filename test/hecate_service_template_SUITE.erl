@@ -26,6 +26,7 @@
 -export([all/0, init_per_suite/1, end_per_suite/1]).
 -export([generates_every_expected_file/1,
          health_script_is_executable/1,
+         sys_config_configures_a_stable_identity/1,
          no_unrendered_variable_survives/1,
          generated_workflow_keeps_actions_syntax/1,
          leaks_no_house_specifics/1,
@@ -44,6 +45,7 @@
 all() ->
     [generates_every_expected_file,
      health_script_is_executable,
+     sys_config_configures_a_stable_identity,
      no_unrendered_variable_survives,
      generated_workflow_keeps_actions_syntax,
      leaks_no_house_specifics,
@@ -189,6 +191,21 @@ health_script_is_executable(Config) ->
     Path = filename:join(?config(root, Config), "scripts/health.sh"),
     {ok, #file_info{mode = Mode}} = file:read_file_info(Path),
     ?assertEqual(8#100, Mode band 8#100).
+
+%% Forgetting identity_key_path produces a sys.config that renders clean,
+%% boots clean, peers and calls fine, and NEVER advertises a single
+%% handler-bearing capability -- silently, forever, on every republish tick
+%% ("an ephemeral service cannot sign and is correctly not advertised" by
+%% design, hecate_om_capabilities's own moduledoc). Confirmed live 2026-08-31
+%% on a service generated from an earlier copy of this template that lacked
+%% this key: keypair/0 stayed {error, no_keypair} for its entire deployed
+%% lifetime, and hecate_stations.list_stations never once reached the DHT.
+%% Same class of recorded recurring mistake as the chmod one above -- a
+%% generated repo that looks completely healthy while doing nothing.
+sys_config_configures_a_stable_identity(Config) ->
+    Path = filename:join(?config(root, Config), "config/sys.config.src"),
+    {ok, Bin} = file:read_file(Path),
+    ?assert(binary:match(Bin, <<"identity_key_path">>) =/= nomatch).
 
 %% A variable named in a file but not declared in the manifest renders as empty
 %% and reports success, so the only way to see it is to look for what is left
