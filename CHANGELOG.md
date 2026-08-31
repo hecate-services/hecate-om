@@ -3,6 +3,21 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.16.5] - 2026-09-01
+
+### Changed
+
+- Picked up `reckon_db` 5.11.1 (already permitted by this repo's own
+  `~> 5.4` constraint; no rebar.config change needed, just a fresh
+  resolve + this release marking it verified). Fixes `read_all_global/3`
+  re-scanning and re-sorting the ENTIRE store on every paginated call --
+  every evoq-based service's catch-up-on-restart replay is affected, not
+  just the one (hecate-sentinel) that surfaced it. See reckon_db's own
+  CHANGELOG for the full writeup (a secondary index was tried first and
+  measured to make it WORSE; fixed with a `global_event_count/1`-
+  fingerprinted cache instead -- ~5.6x on a realistic 10k-event catch-up
+  burst). 82/82 eunit + 15/15 CT pass against the new version.
+
 ## [0.16.4] - 2026-08-31
 
 ### Fixed
