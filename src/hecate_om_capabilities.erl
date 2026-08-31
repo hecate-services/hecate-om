@@ -456,7 +456,7 @@ resolve_org_capabilities(Pool, Realm, Org) ->
 %% `procedure_uri/3' builds (a wildcard trailing segment, matched via
 %% `macula_topic_pattern:matches/2').
 org_capability_pattern(Realm, Org) ->
-    [binary:encode_hex(Realm), Org, <<"*">>].
+    [binary:encode_hex(Realm, uppercase), Org, <<"*">>].
 
 find_by_type(Pool) ->
     on_find_by_type(find_records_by_type(Pool)).
@@ -522,7 +522,7 @@ org_scoped_or_any([], Pool, Realm, CapName) ->
 %% through this lookup — documented as written "for a capability another
 %% mechanism serves".
 discovery_key(Realm, Name) ->
-    macula_record:procedure_key(<<(binary:encode_hex(Realm))/binary, "/",
+    macula_record:procedure_key(<<(binary:encode_hex(Realm, uppercase))/binary, "/",
                                   Name/binary>>).
 
 %% Org-qualified discovery key -- Realm/Org/Name, procedure_uri/3's own
@@ -734,7 +734,7 @@ procedure_uri(Realm, Org, #{name := Name}) ->
     procedure_uri(Realm, Org, Name);
 procedure_uri(Realm, Org, Name)
   when is_binary(Realm), is_binary(Org), is_binary(Name) ->
-    <<(binary:encode_hex(Realm))/binary, "/", Org/binary, "/", Name/binary>>.
+    <<(binary:encode_hex(Realm, uppercase))/binary, "/", Org/binary, "/", Name/binary>>.
 
 %% Build the `quic://' seed URL a pool dials, bracketing IPv6 hosts.
 -spec station_url(binary(), 1..65535) -> binary().

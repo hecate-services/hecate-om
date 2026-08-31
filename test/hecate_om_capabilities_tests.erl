@@ -27,7 +27,7 @@ procedure_uri_agrees_and_is_realm_scoped_test() ->
     FromCap  = hecate_om_capabilities:procedure_uri(R, <<"acme">>, cap(Name)),
     FromName = hecate_om_capabilities:procedure_uri(R, <<"acme">>, Name),
     ?assertEqual(FromName, FromCap),
-    ?assertEqual(<<(binary:encode_hex(R))/binary, "/acme/", Name/binary>>, FromCap).
+    ?assertEqual(<<(binary:encode_hex(R, uppercase))/binary, "/acme/", Name/binary>>, FromCap).
 
 build_advertisement_round_trips_test() ->
     Kp = macula_identity:generate(),
@@ -163,7 +163,7 @@ org_procedure_matches_procedure_uri_when_realm_prefixed_test() ->
     R    = realm(),
     Org  = <<"acme">>,
     Name = <<"svc.do">>,
-    DiscoveryUriShape = <<(binary:encode_hex(R))/binary, "/",
+    DiscoveryUriShape = <<(binary:encode_hex(R, uppercase))/binary, "/",
                           (hecate_om_capabilities:org_procedure(Org, Name))/binary>>,
     ?assertEqual(hecate_om_capabilities:procedure_uri(R, Org, Name),
                  DiscoveryUriShape).
@@ -228,7 +228,7 @@ build_advertisement_honors_a_proportioned_ttl_test() ->
 
 org_capability_pattern_is_realm_hex_org_star_test() ->
     R = realm(),
-    ?assertEqual([binary:encode_hex(R), <<"acme">>, <<"*">>],
+    ?assertEqual([binary:encode_hex(R, uppercase), <<"acme">>, <<"*">>],
                  hecate_om_capabilities:org_capability_pattern(R, <<"acme">>)).
 
 matches_org_pattern_matches_any_name_under_the_org_test() ->
