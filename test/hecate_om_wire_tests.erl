@@ -95,6 +95,16 @@ field_leaves_a_plain_binary_untouched_test() ->
 field_default_survives_unwrap_as_a_noop_test() ->
     ?assertEqual(document, hecate_om_wire:field(<<"mode">>, #{}, document)).
 
+%%% caller/1 -- the well-known field name for macula_station_link's
+%%% (>= 10.15.0) wire-authenticated RPC caller.
+
+caller_reads_the_field_test() ->
+    Pub = <<1, 2, 3>>,
+    ?assertEqual(Pub, hecate_om_wire:caller(#{caller => Pub})).
+
+caller_is_undefined_when_absent_test() ->
+    ?assertEqual(undefined, hecate_om_wire:caller(#{})).
+
 unwrap_scalar_test() ->
     ?assertEqual(<<"x">>, hecate_om_wire:unwrap({text, <<"x">>})),
     ?assertEqual(undefined, hecate_om_wire:unwrap(null)),

@@ -48,6 +48,7 @@
 
 -export([field/2, field/3, unwrap/1]).
 -export([retryable/1]).
+-export([caller/1]).
 
 %% @equiv field(Key, Payload, undefined)
 -spec field(atom() | binary(), map()) -> term().
@@ -92,6 +93,21 @@ unwrap(null) -> undefined;
 unwrap(List) when is_list(List) -> [unwrap(V) || V <- List];
 unwrap(Map) when is_map(Map) -> maps:map(fun(_K, V) -> unwrap(V) end, Map);
 unwrap(Other) -> Other.
+
+%% @doc The identity that made this RPC call, or `undefined' if the
+%% connected macula doesn't thread it yet (pre-10.15.0 -- see
+%% `macula_station_link:handle_inbound_call/2''s own doc for why it took
+%% until then) or if this payload didn't arrive via an RPC path at all
+%% (a pubsub event's caller-equivalent is `publisher', delivered via
+%% `Meta', not the payload -- see `macula_pubsub:subscribe_callback/4').
+%%
+%% Just `field(caller, Payload)' under a name every desk that wants
+%% provenance can reach for instead of re-deciding the field name --
+%% the same reasoning `field/2,3''s own moduledoc gives for existing as
+%% a shared helper rather than N per-desk reimplementations.
+-spec caller(map()) -> binary() | undefined.
+caller(Payload) ->
+    field(caller, Payload).
 
 %% `binary_to_existing_atom/2' raises for a binary with no atom form
 %% anywhere in the VM yet. `Key' is a literal the calling handler wrote,

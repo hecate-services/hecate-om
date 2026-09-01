@@ -3,6 +3,18 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.22.0] - 2026-09-01
+
+### Added
+
+- `hecate_om_wire:caller/1` -- reads the RPC caller's wire-authenticated
+  identity out of a decoded payload (`field(caller, Payload)` under one
+  well-known name, same reasoning `field/2,3` itself already gives for
+  existing as a shared helper). Only populated by macula >= 10.15.0,
+  which is the version that first merges `caller` into `Payload` in
+  `macula_station_link:handle_inbound_call/2` -- on an older macula this
+  reads `undefined`, same as any other absent field.
+
 ## [0.21.0] - 2026-09-01
 
 ### Fixed
