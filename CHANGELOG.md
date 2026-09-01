@@ -3,6 +3,34 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.20.0] - 2026-09-01
+
+### Added
+
+- `hecate_om_wire:unwrap/1` (exported, pure): recursively converts
+  `macula_record_cbor`'s wire-level value representation into plain
+  Erlang terms -- `{text, Bin}` (CBOR text string, major type 3) to
+  `Bin`, `null` to `undefined`, through list elements and map values.
+
+### Fixed
+
+- `hecate_om_wire:field/2,3` returned the wire-level CBOR value
+  representation unchanged, not the plain Erlang term a caller's
+  `is_binary/1` guard or `:: binary()` field spec actually needs. A
+  JSON string sent as an RPC arg is encoded as a CBOR text string,
+  which decodes to `{text, binary()}`, not a bare `binary()` -- a
+  plain binary is reserved for a CBOR BYTE string (major type 2), a
+  different wire type (see `macula_record_cbor`'s own moduledoc for
+  the full value() table). Every consumer of `field/2,3` -- this
+  module's own fix for the atom/binary KEY hazard notwithstanding --
+  was still silently failing every VALUE-shape check on a real mesh
+  caller's payload, indistinguishable from a missing field. Found live
+  2026-09-01 diagnosing hecate-rag's `get_document_verbatim`: a
+  temporary diagnostic log showed the actual payload as
+  `#{source_path => {text, <<"...">>}}` -- the key lookup was already
+  correct, the value never was. `field/2,3` now runs whatever it finds
+  (or the caller's own `Default`) through `unwrap/1` before returning.
+
 ## [0.19.0] - 2026-09-01
 
 ### Added

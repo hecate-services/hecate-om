@@ -50,6 +50,62 @@ binary_key_with_no_existing_atom_form_does_not_raise_test() ->
     ?assertEqual(<<"still findable via the binary form">>,
                  hecate_om_wire:field(NoAtomForm, Payload)).
 
+%%% unwrap/1 -- found live 2026-09-01: a JSON string sent as an RPC arg
+%%% decodes to `{text, Bin}' (CBOR text string, major type 3), not a
+%%% bare binary, per macula_record_cbor's own documented value()
+%%% representation. field/2,3 must return the unwrapped binary, not the
+%%% wire-level tuple, or every is_binary/1 guard downstream silently
+%%% fails to match a real caller's payload.
+
+field_unwraps_a_cbor_text_tuple_test() ->
+    ?assertEqual(<<"hecate-corpus/CODEX.md">>,
+                 hecate_om_wire:field(source_path,
+                                      #{source_path => {text, <<"hecate-corpus/CODEX.md">>}})).
+
+field_unwraps_a_cbor_text_tuple_found_via_binary_key_test() ->
+    ?assertEqual(<<"x">>,
+                 hecate_om_wire:field(<<"k">>, #{<<"k">> => {text, <<"x">>}})).
+
+field_unwraps_null_to_undefined_test() ->
+    ?assertEqual(undefined, hecate_om_wire:field(k, #{k => null})).
+
+field_unwraps_a_list_of_cbor_text_tuples_test() ->
+    ?assertEqual([<<"a">>, <<"b">>],
+                 hecate_om_wire:field(topics, #{topics => [{text, <<"a">>}, {text, <<"b">>}]})).
+
+%% A caller round-tripping a prior response's hits back in as an arg
+%% (rerank_results' own real shape) -- each hit map's OWN values need
+%% the identical unwrap, not just the top-level list.
+field_unwraps_a_list_of_maps_with_cbor_text_values_test() ->
+    Hits = [#{content => {text, <<"first">>}, score => 0.9},
+            #{content => {text, <<"second">>}, score => 0.5}],
+    ?assertEqual([#{content => <<"first">>, score => 0.9},
+                  #{content => <<"second">>, score => 0.5}],
+                 hecate_om_wire:field(hits, #{hits => Hits})).
+
+%% A plain binary (CBOR BYTE string, major type 2) is a different wire
+%% type from a CBOR text string -- must pass through untouched, not be
+%% mistaken for something needing unwrapping.
+field_leaves_a_plain_binary_untouched_test() ->
+    ?assertEqual(<<"already plain">>, hecate_om_wire:field(k, #{k => <<"already plain">>})).
+
+%% A caller's own literal Default is an ordinary Erlang term, not a
+%% wire-decoded value -- unwrap/1 on it must be a no-op, not a crash or
+%% a surprising transformation.
+field_default_survives_unwrap_as_a_noop_test() ->
+    ?assertEqual(document, hecate_om_wire:field(<<"mode">>, #{}, document)).
+
+unwrap_scalar_test() ->
+    ?assertEqual(<<"x">>, hecate_om_wire:unwrap({text, <<"x">>})),
+    ?assertEqual(undefined, hecate_om_wire:unwrap(null)),
+    ?assertEqual(42, hecate_om_wire:unwrap(42)),
+    ?assertEqual(<<"raw">>, hecate_om_wire:unwrap(<<"raw">>)).
+
+unwrap_is_recursive_through_nested_lists_and_maps_test() ->
+    Wire = #{a => {text, <<"1">>}, b => [{text, <<"2">>}, #{c => {text, <<"3">>}}]},
+    ?assertEqual(#{a => <<"1">>, b => [<<"2">>, #{c => <<"3">>}]},
+                 hecate_om_wire:unwrap(Wire)).
+
 %%% retryable/1 (piece G) -- real BOLT#4 codes from macula_bolt4:table/0,
 %%% not fabricated ones, so a real table edit is what would break these.
 
