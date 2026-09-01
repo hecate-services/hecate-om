@@ -3,6 +3,31 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.18.0] - 2026-09-01
+
+### Added
+
+- `hecate_om_service:capability()` may now carry `kind => streamer`
+  (default `response`) and `stream_opts => #{mode => server_stream |
+  client_stream}`. The internal advertise dispatch in
+  `hecate_om_capabilities` now sends the two `advertise_direct` calls
+  (bare + org-qualified) through `macula_streamer` instead of
+  `macula_response` for a streamer-kind capability -- both provider
+  modules publish the identical
+  `procedure_advertisement` DHT record and read the same `Opts' keys
+  (`ttl_ms`, `reuse_sup`, `cert_chain`), so this changes only which
+  module gets called. New `provider_module/1` and `stream_opts/1`
+  (exported, pure). `call_capability/5,7` (the direct-dial CALL path)
+  stays response-only, unchanged -- a streamer capability is consumed
+  via `macula_stream_sink:start_link_direct/5,6`, a genuinely different
+  client-side API, not a gap in this change.
+- Motivated by `hecate-tube`'s `tube_mesh_providers.erl`: three of its
+  four hand-rolled `macula_response:advertise_direct` calls migrated
+  onto `capabilities/0` when this module already existed (0.17.0's own
+  hand-rolled-loop migration story, above, for `hecate-rag`), but the
+  fourth (`tube.watch_video_clip`) is `macula_streamer`-backed and had
+  nothing to migrate onto until now.
+
 ## [0.17.0] - 2026-09-01
 
 ### Added

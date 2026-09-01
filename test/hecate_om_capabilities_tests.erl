@@ -8,11 +8,16 @@
 -include_lib("eunit/include/eunit.hrl").
 -include_lib("public_key/include/public_key.hrl").
 
-%% Placeholder macula_response callback module (piece B tests below) —
-%% referenced only by module atom (`{?MODULE, []}'), dispatched at real
-%% inbound-call time, which these tests never reach (no live station).
+%% Placeholder macula_response AND macula_streamer callback module (piece
+%% B tests + the streamer-kind tests below) — referenced only by module
+%% atom (`{?MODULE, []}'), dispatched at real inbound-call/stream-open
+%% time, which these tests never reach (no live station). Only
+%% `-behaviour(macula_response)' is declared: the compiler rejects two
+%% `-behaviour' attributes sharing a callback name (both declare
+%% `init/1'), so `handle_open/2' (macula_streamer's own callback) is
+%% exported without the second attribute.
 -behaviour(macula_response).
--export([init/1, handle_request/2]).
+-export([init/1, handle_request/2, handle_open/2]).
 
 realm()      -> crypto:strong_rand_bytes(32).
 station()    -> crypto:strong_rand_bytes(32).
@@ -348,6 +353,41 @@ auth_opts_carries_a_ucan_required_policy_test() ->
                      handler => {my_mod, []},
                      auth => {ucan_required, Issuer}})).
 
+%%% A capability opts into being advertised via macula_streamer instead
+%%% of macula_response with `kind => streamer' -- absent (every
+%%% capability declared before this existed) it's macula_response,
+%%% unchanged. `stream_opts' only ever applies to the streamer branch.
+
+provider_module_is_macula_response_by_default_test() ->
+    ?assertEqual(macula_response,
+                 hecate_om_capabilities:provider_module(
+                   #{name => <<"svc.do">>, version => 1,
+                     handler => {my_mod, []}})).
+
+provider_module_is_macula_streamer_when_the_capability_opts_in_test() ->
+    ?assertEqual(macula_streamer,
+                 hecate_om_capabilities:provider_module(
+                   #{name => <<"svc.watch">>, version => 1,
+                     handler => {my_mod, []}, kind => streamer})).
+
+stream_opts_is_absent_for_a_response_kind_capability_test() ->
+    ?assertEqual(#{}, hecate_om_capabilities:stream_opts(
+                         #{name => <<"svc.do">>, version => 1,
+                           handler => {my_mod, []},
+                           stream_opts => #{mode => client_stream}})).
+
+stream_opts_carries_the_streamer_capabilitys_own_opts_test() ->
+    ?assertEqual(#{mode => client_stream},
+                 hecate_om_capabilities:stream_opts(
+                   #{name => <<"svc.watch">>, version => 1,
+                     handler => {my_mod, []}, kind => streamer,
+                     stream_opts => #{mode => client_stream}})).
+
+stream_opts_is_absent_for_a_streamer_capability_with_none_set_test() ->
+    ?assertEqual(#{}, hecate_om_capabilities:stream_opts(
+                         #{name => <<"svc.watch">>, version => 1,
+                           handler => {my_mod, []}, kind => streamer})).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.
@@ -427,6 +467,34 @@ live_pool_handler_capability_test_() ->
 
 init(_Args) -> {ok, []}.
 handle_request(_Payload, State) -> {reply, ok, State}.
+handle_open(_StreamArgs, State) -> {ok, State}.
+
+%%%===================================================================
+%%% Same live-pool, zero-seeds technique as live_pool_handler_capability_test_/0,
+%%% for a `kind => streamer' capability: proves advertise_one/6 dispatches
+%%% to macula_streamer:advertise_direct (not macula_response) and reaches
+%%% the real SDK boundary, degrading the same way with no station.
+%%%===================================================================
+
+live_pool_streamer_capability_test_() ->
+    {timeout, 15,
+     {setup, fun start_live/0, fun stop_live/1,
+      fun(_) ->
+         Cap = #{name => <<"svc.watch">>, version => 1,
+                handler => {?MODULE, []}, kind => streamer},
+         [
+          {"register with a streamer-kind capability reaches macula_streamer's "
+           "advertise_direct and degrades cleanly with no healthy station",
+           fun() ->
+              ?assertEqual(ok, hecate_om_capabilities:register([Cap]))
+           end},
+          {"a second tick is just as stable for the streamer path too",
+           fun() ->
+              ?assertEqual(ok, hecate_om_capabilities:publish()),
+              ?assertEqual(ok, hecate_om_capabilities:publish())
+           end}
+         ]
+      end}}.
 
 start_live() ->
     {ok, _} = application:ensure_all_started(macula),

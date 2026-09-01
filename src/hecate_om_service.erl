@@ -23,9 +23,23 @@
 
 -type info()           :: #{name := binary(), version := binary(), description := binary()}.
 -type health()         :: ok | {degraded, term()} | {down, term()}.
+%% `kind' selects which macula provider module `hecate_om_capabilities'
+%% advertises `handler' through: `response' (default,
+%% `macula_response:advertise_direct/7' — request/reply RPC) or
+%% `streamer' (`macula_streamer:advertise_direct/7' — a
+%% `-behaviour(macula_streamer)' handler, consumed via
+%% `macula_stream_sink:start_link_direct/5,6', not `call_capability/5,7'
+%% — that path is response-only). `stream_opts' is forwarded to the
+%% streamer only, e.g. `#{mode => client_stream}' (default
+%% `server_stream'). Both provider modules publish the same
+%% `procedure_advertisement' DHT record and read the same `Opts' keys
+%% (`ttl_ms', `reuse_sup', `cert_chain', `auth'), so `kind' changes only
+%% which module gets called, nothing else about advertisement.
 -type capability()     :: #{name := binary(), version := pos_integer(),
                             handler => {module(), term()},
-                            auth => open | {ucan_required, <<_:256>>}}.
+                            auth => open | {ucan_required, <<_:256>>},
+                            kind => response | streamer,
+                            stream_opts => #{mode => server_stream | client_stream}}.
 -type identity_spec()  :: #{scope := binary(),
                             actions := [binary()],
                             resources := [binary()],

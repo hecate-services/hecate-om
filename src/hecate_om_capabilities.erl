@@ -2,10 +2,12 @@
 %%% other services' capabilities from the DHT.
 %%%
 %%% A capability carrying `handler => {HandlerModule, Args}' is advertised
-%%% TWICE via `macula_response:advertise_direct/7' — the SDK's own
-%%% supervised wrapper, which registers a handler with the pool AND
-%%% publishes the signed `procedure_advertisement' DHT record naming this
-%%% pool's connected station, in one call:
+%%% TWICE via `advertise_direct/7' on its provider module (see
+%%% `provider_module/1') — `macula_response' (request/reply RPC, the
+%%% default) or `macula_streamer' (a `kind => streamer' capability) — the
+%%% SDK's own supervised wrapper, which registers a handler with the pool
+%%% AND publishes the signed `procedure_advertisement' DHT record naming
+%%% this pool's connected station, in one call:
 %%%
 %%%   1. under the bare capability name (`Name') — the any-provider,
 %%%      backward-compatible registration every caller could always reach;
@@ -122,6 +124,7 @@
 -export([procedure_uri/3, org_procedure/2, build_advertisement/5,
          build_advertisement/6, decode_resolved/1, station_url/2,
          has_handler/1, auth_opts/1, reuse_sup_opts/1, advertise_opts/1,
+         provider_module/1, stream_opts/1,
          discovery_key/2, discovery_key_org/3,
          org_scoped_or_any/4, org_scoped_full_or_any/5,
          org_capability_pattern/2, matches_org_pattern/2,
@@ -348,13 +351,33 @@ has_handler(_) -> false.
 auth_opts(#{auth := Policy}) -> #{auth => Policy};
 auth_opts(_)                 -> #{}.
 
+%% @doc Which macula provider module advertises `Cap''s handler --
+%% `macula_streamer' only when the capability opts in with `kind =>
+%% streamer', `macula_response' (request/reply RPC) otherwise. Every
+%% capability declared before `kind' existed has no such key and keeps
+%% advertising through `macula_response', unchanged.
+-spec provider_module(hecate_om_service:capability()) -> module().
+provider_module(#{kind := streamer}) -> macula_streamer;
+provider_module(_)                  -> macula_response.
+
+%% @doc `Cap''s `stream_opts' (e.g. `#{mode => client_stream}'), merged
+%% into `advertise_direct''s `Opts' only for a `kind => streamer'
+%% capability -- `macula_response:advertise_direct' has no `mode' concept
+%% and a `response'-kind capability has no `stream_opts' to begin with,
+%% so this is `#{}' for every non-streamer capability.
+-spec stream_opts(hecate_om_service:capability()) -> map().
+stream_opts(#{kind := streamer, stream_opts := Opts}) -> Opts;
+stream_opts(_)                                        -> #{}.
+
 advertise_one(Pool, KeyPair, Realm, Org, CertOpts,
              #{name := Name, handler := {Mod, Args}} = Cap, Sups) ->
+    Provider = provider_module(Cap),
     OrgProcedure = org_procedure(Org, Name),
     AuthOpts = auth_opts(Cap),
-    BareOpts = maps:merge(maps:merge(CertOpts, AuthOpts),
+    StreamOpts = stream_opts(Cap),
+    BareOpts = maps:merge(maps:merge(maps:merge(CertOpts, AuthOpts), StreamOpts),
                           reuse_sup_opts(maps:get(Name, Sups, undefined))),
-    OrgOpts  = maps:merge(maps:merge(CertOpts, AuthOpts),
+    OrgOpts  = maps:merge(maps:merge(maps:merge(CertOpts, AuthOpts), StreamOpts),
                           reuse_sup_opts(maps:get(OrgProcedure, Sups, undefined))),
     %% Two independent advertise_direct calls, two independent wire-level
     %% ADVERTISE registrations and DHT records -- see moduledoc for why
@@ -362,11 +385,15 @@ advertise_one(Pool, KeyPair, Realm, Org, CertOpts,
     %% keyed, so two orgs sharing a bare name collide) and sufficient (no
     %% separate record-only write needed; advertise_direct's own DHT
     %% publish for the org-qualified name already lands at
-    %% discovery_key_org/3's key).
-    BareResult = macula_response:advertise_direct(Pool, Realm, Name, Mod, Args,
-                                                   KeyPair, BareOpts),
-    OrgResult  = macula_response:advertise_direct(Pool, Realm, OrgProcedure, Mod,
-                                                   Args, KeyPair, OrgOpts),
+    %% discovery_key_org/3's key). `Provider' is `macula_response' for
+    %% every existing capability (no `kind' key set); `macula_streamer'
+    %% only for one that opts in with `kind => streamer' -- both publish
+    %% the identical `procedure_advertisement' record type, see
+    %% `hecate_om_service:capability()''s doc.
+    BareResult = Provider:advertise_direct(Pool, Realm, Name, Mod, Args,
+                                           KeyPair, BareOpts),
+    OrgResult  = Provider:advertise_direct(Pool, Realm, OrgProcedure, Mod,
+                                           Args, KeyPair, OrgOpts),
     Sups1 = advertised(BareResult, Name, Sups),
     advertised(OrgResult, OrgProcedure, Sups1);
 advertise_one(Pool, KeyPair, Realm, Org, CertOpts, Cap, Sups) ->
