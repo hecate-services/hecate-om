@@ -511,6 +511,66 @@ live_pool_streamer_capability_test_() ->
          ]
       end}}.
 
+%%%===================================================================
+%%% Regression test for the crash-cascade bug found live 2026-09-01
+%%% (hecate-rag): one capability's `advertise_direct' call raising (the
+%%% real incident was a `gen_server:call' timeout against the station
+%%% link) used to crash the whole `hecate_om_capabilities' process
+%%% before it could register any OTHER capability in the same batch --
+%%% and, via `macula_response'/`macula_streamer' linking each factory
+%%% supervisor to this process, killed every already-healthy sibling
+%%% supervisor too. `advertise_one_safely/7' isolates one capability's
+%%% failure instead. Same live-pool-zero-seeds technique as
+%%% live_pool_handler_capability_test_/0, with `macula_response:
+%%% advertise_direct/7' meck'd to raise for one specific capability
+%%% while the other still reaches the real (station-less) SDK boundary.
+%%%===================================================================
+
+advertise_one_timeout_test_() ->
+    {timeout, 15,
+     {setup, fun start_live/0, fun stop_live/1,
+      fun(_) ->
+         Ok   = #{name => <<"svc.answer">>, version => 1, handler => {?MODULE, []}},
+         Boom = #{name => <<"svc.ingest">>, version => 1, handler => {?MODULE, []}},
+         [
+          {"a capability whose advertise_direct call raises does not "
+           "crash the registration process or block its siblings",
+           fun() ->
+              Pid = whereis(hecate_om_capabilities),
+              %% No [passthrough]: the real advertise_direct/7 would
+              %% just return {error, no_healthy_station} in this
+              %% zero-seed test pool anyway (see
+              %% live_pool_handler_capability_test_/0), so a plain stub
+              %% for BOTH branches proves the isolation without needing
+              %% meck's passthrough (which needs debug_info this
+              %% dependency build doesn't carry).
+              ok = meck:new(macula_response, []),
+              ok = meck:expect(macula_response, advertise_direct,
+                    fun(_Pool, _Realm, Proc, _Mod, _Args, _Kp, _Opts) ->
+                       advertise_direct_stub(Proc)
+                    end),
+              ?assertEqual(ok, hecate_om_capabilities:register([Ok, Boom])),
+              ?assert(is_process_alive(Pid)),
+              ?assertEqual(Pid, whereis(hecate_om_capabilities)),
+              meck:unload(macula_response)
+           end}
+         ]
+      end}}.
+
+%% `Proc' is `Name' or `org_procedure(Org, Name)' depending on which of
+%% advertise_one/7's two calls this is -- match on substring so either
+%% form triggers the same simulated timeout for the "boom" capability;
+%% the other capability gets a plain, valid-looking {ok, Sup} so the
+%% test proves it registers normally alongside the failing one.
+advertise_direct_stub(Proc) ->
+    advertise_direct_stub(Proc, binary:match(Proc, <<"svc.ingest">>)).
+
+advertise_direct_stub(Proc, {_, _}) ->
+    exit({timeout, {gen_server, call,
+                    [self(), {advertise, Proc, fake_handler, open}, 5000]}});
+advertise_direct_stub(_Proc, nomatch) ->
+    {ok, self()}.
+
 start_live() ->
     {ok, _} = application:ensure_all_started(macula),
     {ok, Pool} = macula_client:connect([], #{}),

@@ -3,6 +3,32 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.21.0] - 2026-09-01
+
+### Fixed
+
+- One capability's `advertise_direct` call raising during a republish
+  tick used to crash the whole `hecate_om_capabilities` gen_server
+  before it could register any other capability in the same batch --
+  and, because `macula_response`/`macula_streamer` link each factory
+  supervisor they create to whoever calls them (this process), the
+  crash killed every OTHER, already-healthy capability's supervisor
+  too, turning one transient timeout into an outage for every
+  capability this node serves. Found live 2026-09-01 via hecate-rag:
+  `hecate_om_capabilities` crashed on a timed-out advertise call for
+  `ingest_document` and, minutes later, unrelated capabilities
+  (`search_chunks_semantic`/`answer_query`/`add_knowledge`) started
+  failing every inbound call with `noproc`. `advertise_one/7` is now
+  called through `advertise_one_safely/7`, which catches per-capability
+  and logs which one failed and why -- the documented exception to
+  this org's let-it-crash default, since the alternative (a single
+  opaque supervisor-exit report) erases exactly that distinction along
+  with every sibling capability's live registration. A failed
+  capability's previous registration is left in place and retried on
+  the next ~30s republish tick. See also `macula` 10.14.5, which
+  independently hardens the same failure class one layer down
+  (`existing_or_new_sup/1` no longer trusts a dead `reuse_sup` pid).
+
 ## [0.20.0] - 2026-09-01
 
 ### Added

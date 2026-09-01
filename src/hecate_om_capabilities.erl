@@ -310,7 +310,7 @@ cert_chain_opts({error, _}) -> #{}.
 
 advertise_with({ok, Pool}, {ok, KeyPair}, {ok, Realm}, Org, CertOpts, Caps, Sups) ->
     lists:foldl(fun(Cap, Acc) ->
-                    advertise_one(Pool, KeyPair, Realm, Org, CertOpts, Cap, Acc)
+                    advertise_one_safely(Pool, KeyPair, Realm, Org, CertOpts, Cap, Acc)
                 end, Sups, Caps);
 %% Missing pool / keypair / realm: cannot reach the mesh or sign. No-op;
 %% the timer retries once all three are present. Existing sups (if any)
@@ -385,6 +385,45 @@ provider_module(_)                  -> macula_response.
 -spec stream_opts(hecate_om_service:capability()) -> map().
 stream_opts(#{kind := streamer, stream_opts := Opts}) -> Opts;
 stream_opts(_)                                        -> #{}.
+
+%% `advertise_one/7' does real network I/O -- a synchronous call into
+%% the station-link connection process -- for every capability on every
+%% republish tick. A single slow or timed-out call must not crash this
+%% whole gen_server: `macula_response:advertise/6' (and
+%% `macula_streamer:advertise/6') LINKS each factory supervisor it
+%% creates to whoever calls it, i.e. this process, so a crash here kills
+%% every OTHER capability's already-healthy supervisor too, turning one
+%% transient timeout into an outage for every capability this node
+%% serves. Found live 2026-09-01: hecate-rag generated `noproc' on
+%% `search_chunks_semantic'/`answer_query'/`add_knowledge' minutes after
+%% a clean boot, none of which had anything to do with the capability
+%% that actually timed out (`ingest_document') -- the crash cascaded
+%% through the link, not through any fault of theirs.
+%%
+%% Catching per-capability here is the documented exception to
+%% let-it-crash (see this org's CLAUDE.md): it distinguishes which
+%% capability failed and why, a signal a single opaque
+%% `hecate_om_capabilities' supervisor-exit report would otherwise erase
+%% along with every other capability's live registration. `Acc' returned
+%% unchanged means the failed capability's PREVIOUS (still live)
+%% registration is left in place; the next republish tick (~30s) retries
+%% it. `macula_response'/`macula_streamer''s own `existing_or_new_sup/1'
+%% additionally verifies a reused sup is still alive before trusting it,
+%% so a sup that DOES die between ticks (this path or any other) self-
+%% heals on the next successful call rather than handing `dispatch' a
+%% dead pid.
+advertise_one_safely(Pool, KeyPair, Realm, Org, CertOpts, Cap, Acc) ->
+    try
+        advertise_one(Pool, KeyPair, Realm, Org, CertOpts, Cap, Acc)
+    catch
+        Class:Reason ->
+            logger:warning(
+              "hecate_om_capabilities: advertise failed for ~s (~p:~p) "
+              "-- keeping the prior registration, retried on the next "
+              "republish tick",
+              [maps:get(name, Cap, unknown), Class, Reason]),
+            Acc
+    end.
 
 advertise_one(Pool, KeyPair, Realm, Org, CertOpts,
              #{name := Name, handler := {Mod, Args}} = Cap, Sups) ->
