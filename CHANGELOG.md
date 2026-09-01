@@ -3,7 +3,7 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [0.17.0] - 2026-09-01
 
 ### Added
 
@@ -20,6 +20,17 @@ Versioning: [SemVer](https://semver.org/).
   delegation-chain walk to a realm root -- see
   `plans/PLAN_UCAN_GATED_CAPABILITIES.md` for the full scope and that
   boundary.
+- `hecate_om_simple_handler`: bridges a stateless one-arity
+  `{Module, Function}` handler (`macula`'s own native calling
+  convention) into `macula_response`'s per-request `init/1` +
+  `handle_request/2` contract, so a hecate-service migrating a
+  capability onto `hecate_om_capabilities:register/1` doesn't need to
+  hand-write that pair itself. Unwraps an `{ok, Value}` reply so the
+  wire payload matches what the bare `{Module, Function}` path already
+  produced -- migrating a capability changes nothing a caller can
+  observe. First real user: `hecate-rag`, migrating all 15 of its
+  capabilities off a hand-rolled `macula:advertise/5` loop onto this
+  path in the same release cycle.
 
 ## [0.16.5] - 2026-09-01
 

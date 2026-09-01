@@ -56,16 +56,34 @@ hecate-service already has available, not a hand-rolled one.
 - 3 new eunit tests for `auth_opts/1` (absence, explicit `open`,
   `{ucan_required, Issuer}`); full suite (85 tests) and dialyzer both
   clean.
+- `hecate_om_simple_handler` (new module): migrating a capability from
+  bare `macula:advertise/5` onto `register/1` hit a real contract
+  mismatch discovered doing exactly that for `hecate-rag` — `macula`'s
+  native handler is a direct `{Module, Function}` call, but
+  `macula_response:advertise_direct/7` (what `register/1` uses) spawns a
+  per-request gen_server expecting `Module:init/1` +
+  `Module:handle_request/2`. This bridges a stateless one-arity handler
+  into that contract, unwrapping an `{ok, _}` reply itself so the two
+  layers' independent `{ok, _}`-handling doesn't compose into a
+  double-wrapped wire payload. 4 tests pin that exact behavior.
+- **`hecate-rag` migrated.** All 15 capabilities now advertise and
+  dispatch through `hecate_om_capabilities:register/1` via
+  `hecate_rag_service:capabilities/0`'s own `handler` key
+  (`{hecate_om_simple_handler, {hecate_rag_mesh_rpc, HandlerFun}}`) —
+  `hecate_rag_mesh_rpc`'s own `advertise_all/0` hand-rolled loop is
+  deleted. Verified: full `rebar3 compile` clean against a local
+  `hecate_om` checkout (this isn't released yet — see hecate-rag's own
+  CHANGELOG). Its Common Test suite has a pre-existing, confirmed
+  (A/B'd against the unmigrated code) `init_per_suite` failure unrelated
+  to this change — not something this migration caused or fixed.
 
 ## What's open — not decided here
 
-- **`hecate-rag` still hand-rolls its own advertise loop** and gets none
-  of this for free until it migrates onto
-  `hecate_om_capabilities:register/1`. That migration is valuable — it
-  also gets org-scoped dual-registration and DHT publishing hecate-rag
-  currently does without — but is separate work this plan doesn't do.
-  Every other hecate-service using the same hand-rolled pattern has the
-  same gap.
+- **Releasing this `hecate_om` version** so `hecate-rag`'s `rebar.config`
+  can move off its temporary `_checkouts/hecate_om` local-dev symlink.
+- **Every other hecate-service still hand-rolling its own advertise
+  loop** (outside `hecate-rag`) has the same gap `hecate-rag` just
+  closed — not this plan's scope to find and migrate all of them.
 - **Which capabilities get gated, and to which issuer**, is a
   per-service decision. Candidates once hecate-rag migrates:
   `prune_chunks`, `schedule_reembed` — corpus-mutating, operator-only —
