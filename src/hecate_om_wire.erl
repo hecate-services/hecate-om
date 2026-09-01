@@ -95,11 +95,10 @@ unwrap(Map) when is_map(Map) -> maps:map(fun(_K, V) -> unwrap(V) end, Map);
 unwrap(Other) -> Other.
 
 %% @doc The identity that made this RPC call, or `undefined' if the
-%% connected macula doesn't thread it yet (pre-10.15.0 -- see
-%% `macula_station_link:handle_inbound_call/2''s own doc for why it took
-%% until then) or if this payload didn't arrive via an RPC path at all
-%% (a pubsub event's caller-equivalent is `publisher', delivered via
-%% `Meta', not the payload -- see `macula_pubsub:subscribe_callback/4').
+%% connected macula doesn't thread it yet (pre-10.15.0 -- macula's own
+%% CHANGELOG explains why it took until then) or if this payload didn't
+%% arrive via an RPC path at all (a pubsub event's caller-equivalent is
+%% `publisher', delivered via a separate Meta argument, not the payload).
 %%
 %% Just `field(caller, Payload)' under a name every desk that wants
 %% provenance can reach for instead of re-deciding the field name --
