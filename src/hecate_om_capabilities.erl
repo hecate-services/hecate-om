@@ -866,9 +866,10 @@ arm_timer(S) ->
     Ref = erlang:send_after(republish_delay_ms(), self(), republish),
     S#state{timer = Ref}.
 
-%% ?REPUBLISH_INTERVAL_MS +/- up to ?REPUBLISH_JITTER_MS / 2, uniformly
-%% -- see ?REPUBLISH_JITTER_MS's own doc for why a fixed period is the
-%% actual bug being fixed here, not just a nice-to-have.
+%% @doc `?REPUBLISH_INTERVAL_MS' +/- up to `?REPUBLISH_JITTER_MS' / 2,
+%% uniformly -- see `?REPUBLISH_JITTER_MS''s own doc for why a fixed
+%% period is the actual bug being fixed here, not just a nice-to-have.
+-spec republish_delay_ms() -> pos_integer().
 republish_delay_ms() ->
     ?REPUBLISH_INTERVAL_MS - (?REPUBLISH_JITTER_MS div 2)
         + rand:uniform(?REPUBLISH_JITTER_MS + 1) - 1.
