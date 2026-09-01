@@ -323,6 +323,31 @@ reuse_sup_opts_carries_a_known_sup_and_nothing_else_test() ->
     ?assertEqual(#{reuse_sup => Sup},
                  hecate_om_capabilities:reuse_sup_opts(Sup)).
 
+%%% PLAN_UCAN_GATED_CAPABILITIES.md: a capability may opt into gating
+%%% via its own `auth' key, forwarded into advertise_direct's Opts.
+%%% Absence must merge nothing -- an explicit #{auth => open} would work
+%%% too (macula:advertise/5 treats them identically) but silently
+%%% differs from every existing capability map already in the wild.
+
+auth_opts_is_absent_when_the_capability_sets_none_test() ->
+    ?assertEqual(#{}, hecate_om_capabilities:auth_opts(
+                         #{name => <<"svc.do">>, version => 1,
+                           handler => {my_mod, []}})).
+
+auth_opts_carries_an_explicit_open_policy_test() ->
+    ?assertEqual(#{auth => open},
+                 hecate_om_capabilities:auth_opts(
+                   #{name => <<"svc.do">>, version => 1,
+                     handler => {my_mod, []}, auth => open})).
+
+auth_opts_carries_a_ucan_required_policy_test() ->
+    Issuer = <<0:256>>,
+    ?assertEqual(#{auth => {ucan_required, Issuer}},
+                 hecate_om_capabilities:auth_opts(
+                   #{name => <<"svc.prune">>, version => 1,
+                     handler => {my_mod, []},
+                     auth => {ucan_required, Issuer}})).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.

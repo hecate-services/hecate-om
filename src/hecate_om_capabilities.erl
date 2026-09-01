@@ -36,6 +36,19 @@
 %%% callable via `call_capability', kept for a capability another
 %%% mechanism serves.
 %%%
+%%% A handler-bearing capability may also carry `auth => {ucan_required,
+%%% IssuerPubkey}' (default, and every existing caller's behavior:
+%%% `open') — forwarded via `auth_opts/1' into BOTH `advertise_direct'
+%%% calls' `Opts', through to `macula:advertise/5' and enforced on every
+%%% inbound call by `macula_station_link''s `authorize_policy/2'. This
+%%% is a direct-signature check against ONE pre-known issuer, not a
+%%% delegation-chain walk to a realm root — it fits "only this one known
+%%% identity may call this capability" (an operator-only capability like
+%%% a corpus-mutating one), not yet "anyone whose UCAN traces back to a
+%%% trusted realm root, however many hops deep." See
+%%% `macula-mcp/plans/PLAN_AGENT_IDENTITY_UCAN.md' for the caller side of
+%%% that larger, separate gap.
+%%%
 %%% `call_capability/5,7' resolves `CapName' under `Org' first
 %%% (`discovery_key_org/3'), falling back to the bare (any-provider) key
 %%% only when `Org' has published nothing there yet. `resolve_full/4' tags
@@ -108,7 +121,7 @@
 %% mesh.
 -export([procedure_uri/3, org_procedure/2, build_advertisement/5,
          build_advertisement/6, decode_resolved/1, station_url/2,
-         has_handler/1, reuse_sup_opts/1, advertise_opts/1,
+         has_handler/1, auth_opts/1, reuse_sup_opts/1, advertise_opts/1,
          discovery_key/2, discovery_key_org/3,
          org_scoped_or_any/4, org_scoped_full_or_any/5,
          org_capability_pattern/2, matches_org_pattern/2,
@@ -323,11 +336,25 @@ log_advertise_gate_once(Reasons) ->
 has_handler(#{handler := _}) -> true;
 has_handler(_) -> false.
 
+%% @doc The `auth' entry to merge into `advertise_direct''s `Opts', from
+%% a capability's own optional `auth' key (`open' | `{ucan_required,
+%% Issuer}', forwarded all the way to `macula_station_link''s inbound
+%% call authorization — see moduledoc). Absent when the capability
+%% doesn't set one, matching `macula:advertise/5''s own default: open.
+%% A hecate-service opts a specific capability into gating by adding
+%% `auth => {ucan_required, IssuerPubkey}' to that capability's map;
+%% every other capability advertised through this module is unaffected.
+-spec auth_opts(hecate_om_service:capability()) -> map().
+auth_opts(#{auth := Policy}) -> #{auth => Policy};
+auth_opts(_)                 -> #{}.
+
 advertise_one(Pool, KeyPair, Realm, Org, CertOpts,
-             #{name := Name, handler := {Mod, Args}}, Sups) ->
+             #{name := Name, handler := {Mod, Args}} = Cap, Sups) ->
     OrgProcedure = org_procedure(Org, Name),
-    BareOpts = maps:merge(CertOpts, reuse_sup_opts(maps:get(Name, Sups, undefined))),
-    OrgOpts  = maps:merge(CertOpts,
+    AuthOpts = auth_opts(Cap),
+    BareOpts = maps:merge(maps:merge(CertOpts, AuthOpts),
+                          reuse_sup_opts(maps:get(Name, Sups, undefined))),
+    OrgOpts  = maps:merge(maps:merge(CertOpts, AuthOpts),
                           reuse_sup_opts(maps:get(OrgProcedure, Sups, undefined))),
     %% Two independent advertise_direct calls, two independent wire-level
     %% ADVERTISE registrations and DHT records -- see moduledoc for why

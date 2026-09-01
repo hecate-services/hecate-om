@@ -3,6 +3,24 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- A capability passed to `hecate_om_capabilities:register/1` may now
+  carry `auth => {ucan_required, IssuerPubkey}` (default, and every
+  existing caller's behavior: `open`), forwarded through both
+  `advertise_direct` calls into `macula:advertise/5` and enforced on
+  every inbound call by `macula`'s own `authorize_policy/2`. The
+  primitive already existed one layer down (`macula`'s `{ucan_required,
+  Issuer}` auth policy); nothing in `hecate_om` used it, so no
+  hecate-service could gate a capability without bypassing
+  `hecate_om_capabilities` entirely. New `auth_opts/1` (exported, pure).
+  This is a direct-signature check against one pre-known issuer, not a
+  delegation-chain walk to a realm root -- see
+  `plans/PLAN_UCAN_GATED_CAPABILITIES.md` for the full scope and that
+  boundary.
+
 ## [0.16.5] - 2026-09-01
 
 ### Changed

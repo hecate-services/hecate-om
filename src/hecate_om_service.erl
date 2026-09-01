@@ -24,7 +24,8 @@
 -type info()           :: #{name := binary(), version := binary(), description := binary()}.
 -type health()         :: ok | {degraded, term()} | {down, term()}.
 -type capability()     :: #{name := binary(), version := pos_integer(),
-                            handler => {module(), term()}}.
+                            handler => {module(), term()},
+                            auth => open | {ucan_required, <<_:256>>}}.
 -type identity_spec()  :: #{scope := binary(),
                             actions := [binary()],
                             resources := [binary()],
