@@ -128,7 +128,7 @@
          discovery_key/2, discovery_key_org/3,
          org_scoped_or_any/4, org_scoped_full_or_any/5,
          org_capability_pattern/2, matches_org_pattern/2,
-         resolve_org_capabilities/3]).
+         resolve_org_capabilities/3, republish_delay_ms/0]).
 
 %% `macula_record.erl''s own `?TYPE_PROCEDURE_ADVERTISEMENT' — not
 %% exported there (no shared header defines it either), so mirrored here.
@@ -144,6 +144,23 @@
 %% the tick also retries the initial write until the pool + a station
 %% link are present.
 -define(REPUBLISH_INTERVAL_MS, 30_000).
+
+%% +/- jitter applied to every scheduled republish tick (see arm_timer/1).
+%% A station-side cooldown this republish races against -- e.g.
+%% macula_remote_advertise_registry's tombstone, deliberately 30s
+%% (bumped from 10s in ea95857 for its own gossip-convergence reasons,
+%% unrelated to this timer) -- is opaque to this module and can equal
+%% or evenly divide ?REPUBLISH_INTERVAL_MS by coincidence. A perfectly
+%% fixed-period retry that loses that race once has no drift to ever
+%% land outside the cooldown window again: found live 2026-09-01,
+%% hecate-rag's `get_document_verbatim` capability stayed
+%% `unknown_method' for 45+ minutes across ~90 identically-timed retries
+%% while sibling capabilities (registered moments earlier or later in
+%% the same advertise batch, landing just outside whatever tombstone
+%% they raced) self-healed on their next tick. Jitter costs nothing
+%% when there is no race and guarantees one eventually lands clear when
+%% there is.
+-define(REPUBLISH_JITTER_MS, 6_000).
 
 %% 4x the republish interval — the same margin `macula_station_announcer'
 %% leaves by refreshing at 75% of TTL — so one or two missed ticks (a
@@ -846,5 +863,12 @@ decode_verified({error, _}, _Record) ->
 %%% Timer
 
 arm_timer(S) ->
-    Ref = erlang:send_after(?REPUBLISH_INTERVAL_MS, self(), republish),
+    Ref = erlang:send_after(republish_delay_ms(), self(), republish),
     S#state{timer = Ref}.
+
+%% ?REPUBLISH_INTERVAL_MS +/- up to ?REPUBLISH_JITTER_MS / 2, uniformly
+%% -- see ?REPUBLISH_JITTER_MS's own doc for why a fixed period is the
+%% actual bug being fixed here, not just a nice-to-have.
+republish_delay_ms() ->
+    ?REPUBLISH_INTERVAL_MS - (?REPUBLISH_JITTER_MS div 2)
+        + rand:uniform(?REPUBLISH_JITTER_MS + 1) - 1.

@@ -3,6 +3,37 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.19.0] - 2026-09-01
+
+### Added
+
+- `hecate_om_capabilities:republish_delay_ms/0` (exported, pure): the
+  periodic re-advertise tick (`?REPUBLISH_INTERVAL_MS`) now schedules
+  itself with +/- 3s of uniform jitter around the nominal 30s instead
+  of a perfectly fixed interval.
+
+### Fixed
+
+- A fixed-period republish timer can permanently lose a race against a
+  station-side cooldown of the same length: `macula-station`'s
+  `macula_remote_advertise_registry` tombstones a re-registration for
+  `?TOMBSTONE_TTL_MS` (30s, deliberately bumped from 10s in `ea95857`
+  for its own gossip-convergence reasons) whenever it is unregistered,
+  and only the same advertiser node-id may re-register during that
+  window. Found live 2026-09-01: `hecate-rag`'s `get_document_verbatim`
+  capability stayed `unknown_method` for 45+ minutes across roughly 90
+  identically-timed retries, while every sibling capability in the same
+  advertise batch (registered moments earlier or later, landing just
+  outside whatever tombstone it individually raced) self-healed on its
+  next tick. Neither side's 30s value was wrong on its own -- the bug
+  was the two periods being exactly equal, which gives a losing retry
+  no drift to ever land outside the window again. Root cause traced
+  through `hecate_om_capabilities`, `macula_response:advertise_direct/7`,
+  and `macula_remote_advertise_registry` before landing here: this is
+  the one client-side fix that protects against ANY station's cooldown
+  period, known or not, rather than tuning to one station's specific
+  constant.
+
 ## [0.18.0] - 2026-09-01
 
 ### Added

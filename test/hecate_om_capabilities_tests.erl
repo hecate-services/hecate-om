@@ -388,6 +388,21 @@ stream_opts_is_absent_for_a_streamer_capability_with_none_set_test() ->
                          #{name => <<"svc.watch">>, version => 1,
                            handler => {my_mod, []}, kind => streamer})).
 
+%%% Republish jitter (found live 2026-09-01) — a perfectly fixed 30s
+%%% republish period can permanently lose a race against a station-side
+%%% cooldown of the same length (macula_remote_advertise_registry's
+%%% tombstone TTL, deliberately 30s for its own gossip-convergence
+%%% reasons — see that module's history). republish_delay_ms/0 must
+%%% actually vary, not just be renamed, or the fix is a no-op.
+
+republish_delay_ms_stays_within_the_jittered_bound_test() ->
+    Delays = [hecate_om_capabilities:republish_delay_ms() || _ <- lists:seq(1, 200)],
+    ?assert(lists:all(fun(D) -> D >= 27_000 andalso D =< 33_000 end, Delays)).
+
+republish_delay_ms_actually_varies_test() ->
+    Delays = [hecate_om_capabilities:republish_delay_ms() || _ <- lists:seq(1, 200)],
+    ?assert(sets:size(sets:from_list(Delays)) > 1).
+
 %%% gen_server + graceful degradation (no mesh) — this is the path that
 %%% actually runs at boot before a pool/keypair are present. Exercises
 %%% init, register/publish/lookup/list, and the no-op / empty degradation.
