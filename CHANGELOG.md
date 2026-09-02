@@ -15,6 +15,10 @@ Versioning: [SemVer](https://semver.org/).
   compile hook before a single test ran -- hit by hecate-agora on
   2026-09-02; hecate-stations had already patched its own copy by hand.
   Template-only change, no library code touched.
+- The scaffold's `build-push.yml` now carries a per-ref `concurrency` group
+  with `cancel-in-progress`, so quick successive pushes to `main` cannot
+  race to overwrite `:latest` with whichever build happened to finish last
+  (hecate-rag hit that live; hecate-agora nearly did on its first morning).
 
 ## [0.23.0] - 2026-09-02
 
