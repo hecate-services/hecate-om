@@ -19,4 +19,4 @@ rebar3 ct
 
 ## Issues
 
-https://codeberg.org/hecate-services/hecate-om/issues
+https://github.com/hecate-services/hecate-om/issues
