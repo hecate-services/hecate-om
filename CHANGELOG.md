@@ -3,6 +3,34 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [0.23.0] - 2026-09-02
+
+### Added
+
+- `hecate_om_ownership_proof:verify/3` -- proves a caller holds the
+  private key for the Ed25519 identity (raw 32-byte pubkey) they claim
+  to be asserting on behalf of, inside an otherwise-open mesh payload:
+  a signature over `{identity, timestamp, procedure}`, procedure-bound
+  so a proof minted for one gated capability can't be replayed against
+  another. Extracted after the identical ~40-line verifier was written
+  twice independently -- hecate-citizens' `citizen_ownership_proof` and
+  hecate-mail's `mailbox_ownership_proof`, each one's own moduledoc
+  naming the exact trigger for consolidating: "a third, unrelated
+  consumer." hecate-graph needing the same mechanism to make its
+  `learn_link` provenance mind-grained (an individual caller's own
+  signed identity, not just the wire-level connection identity) is that
+  third consumer. A DIFFERENT mechanism from `{ucan_required, Issuer}`
+  capability gating (`plans/PLAN_UCAN_GATED_CAPABILITIES.md`): that
+  controls who may call a procedure at all; this proves who asserted a
+  specific claim inside one. Also exports `message/3` (the exact signed
+  byte layout, for a caller building a proof) and `decode_identity/1`/
+  `decode_text/1` (the same wire-shape-tolerant unwrap both existing
+  consumers already needed). 10 new tests.
+- Existing consumers (`hecate-citizens`, `hecate-mail`) keep their own
+  local copies for now -- not migrated here, no bug in either, out of
+  scope for this extraction. Worth doing later so there's one verifier
+  instead of three.
+
 ## [0.22.0] - 2026-09-01
 
 ### Added
