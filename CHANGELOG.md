@@ -3,6 +3,19 @@
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning: [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The `hecate_service` scaffold's `lint.yml` now installs a Rust toolchain
+  before `rebar3 lint`/`eunit`, and its header no longer claims none is
+  needed on the glibc image. `macula_cbor_nif` (macula >= 10.14, so every
+  service on hecate_om >= 0.20) has no Erlang fallback and refuses to be
+  skipped, so a freshly scaffolded service's very first CI run failed in the
+  compile hook before a single test ran -- hit by hecate-agora on
+  2026-09-02; hecate-stations had already patched its own copy by hand.
+  Template-only change, no library code touched.
+
 ## [0.23.0] - 2026-09-02
 
 ### Added

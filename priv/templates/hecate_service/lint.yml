@@ -1,6 +1,11 @@
 {{=<% %>=}}# Structural lint and unit tests. Runs on the glibc erlang image, where macula
-# resolves a prebuilt QUIC NIF and no Rust toolchain is needed. The alpine image
-# build forces a source build instead; see the Containerfile for why.
+# resolves a prebuilt QUIC NIF -- but macula_cbor_nif (and the crypto/ucan/did/
+# mri NIFs beside it) have no such fallback and ALWAYS build from source, so a
+# Rust toolchain is needed here too or `rebar3 compile' fails in the
+# macula_cbor_nif hook before a single test runs (its build script refuses to
+# silently skip, because a package that compiles clean and fails every caller
+# at runtime with nif_not_loaded is worse). The alpine image build forces a
+# source build for everything including macula_quic; see the Containerfile.
 
 name: lint-and-test
 
@@ -36,6 +41,11 @@ jobs:
       # again in hecate-stations, the first scaffolded service to actually
       # exercise read_model_id/0 in CI -- install all four, not just
       # whichever one happened to be exercised first.
-      - run: apt-get update && apt-get install -y --no-install-recommends cmake build-essential libsnappy-dev liblz4-dev libzstd-dev libbz2-dev
+      - run: apt-get update && apt-get install -y --no-install-recommends cmake build-essential libsnappy-dev liblz4-dev libzstd-dev libbz2-dev curl
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+            | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - run: rebar3 lint
       - run: rebar3 eunit
