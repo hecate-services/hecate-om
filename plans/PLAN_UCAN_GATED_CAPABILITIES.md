@@ -5,6 +5,15 @@ Status: **Implemented.** `hecate_om_capabilities:register/1` accepts an
 app), dialyzer clean. What's left is per-service adoption — see "What's
 open."
 
+**Rollout-safety follow-on (2026-09-03, same repo):**
+`hecate_om_capabilities:unguarded_capabilities/1` + `scripts/audit-fleet-ucan-adoption.sh`
+(CHANGELOG `[Unreleased]`) — the audit half of not silently missing a
+service when this rolls out fleet-wide. Sequenced as Phase 4 of
+`macula-io/macula-architecture/plans/PLAN_CLOSE_SERVICE_AUTH_GAPS.md`,
+which also found that no client SDK can present a UCAN over direct-dial
+yet — this module's own gating has nothing a polyglot caller can attach a
+token to until that SDK-side gap closes.
+
 ## Goal
 
 A hecate-service should be able to mark a specific mesh capability as

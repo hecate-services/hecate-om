@@ -353,6 +353,39 @@ auth_opts_carries_a_ucan_required_policy_test() ->
                      handler => {my_mod, []},
                      auth => {ucan_required, Issuer}})).
 
+%%% unguarded_capabilities/1: which of a service's own declared
+%%% capabilities have no explicit auth key at all -- register/1 logs
+%%% exactly this list at boot (see hecate_om_capabilities' own
+%%% moduledoc for why this can only see what capabilities/0 reports,
+%%% not a capability advertised out-of-band).
+
+unguarded_capabilities_is_empty_when_every_capability_sets_auth_test() ->
+    ?assertEqual([],
+                 hecate_om_capabilities:unguarded_capabilities(
+                   [#{name => <<"svc.read">>, version => 1,
+                      handler => {my_mod, []}, auth => open},
+                    #{name => <<"svc.prune">>, version => 1,
+                      handler => {my_mod, []}, auth => {ucan_required, <<0:256>>}}])).
+
+unguarded_capabilities_names_every_capability_with_no_auth_key_test() ->
+    ?assertEqual([<<"svc.read">>, <<"svc.prune">>],
+                 hecate_om_capabilities:unguarded_capabilities(
+                   [#{name => <<"svc.read">>, version => 1,
+                      handler => {my_mod, []}},
+                    #{name => <<"svc.prune">>, version => 1,
+                      handler => {my_mod, []}},
+                    #{name => <<"svc.reviewed">>, version => 1,
+                      handler => {my_mod, []}, auth => open}])).
+
+unguarded_capabilities_treats_explicit_open_as_reviewed_not_unguarded_test() ->
+    %% auth => open and no auth key at all advertise identically
+    %% (macula:advertise/5 treats them the same), but only the latter
+    %% is a decision nobody actually made yet.
+    ?assertEqual([],
+                 hecate_om_capabilities:unguarded_capabilities(
+                   [#{name => <<"svc.read">>, version => 1,
+                      handler => {my_mod, []}, auth => open}])).
+
 %%% A capability opts into being advertised via macula_streamer instead
 %%% of macula_response with `kind => streamer' -- absent (every
 %%% capability declared before this existed) it's macula_response,

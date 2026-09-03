@@ -5,6 +5,37 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `hecate_om_capabilities:unguarded_capabilities/1` (exported, pure): names
+  every capability in a list with no explicit `auth` key -- i.e. every one
+  that will silently advertise `open` via `auth_opts/1`'s own default,
+  whether that's a real decision or nobody set it yet. `register/1` now
+  logs exactly this list, once, whenever a service (re-)registers its
+  capabilities -- free, per-boot visibility into fleet-wide `auth` adoption
+  for every service that routes through this module. Phase 1 of rolling
+  out `{ucan_required, Issuer}` fleet-wide without silently missing a
+  service (the concern `PLAN_UCAN_GATED_CAPABILITIES.md`'s own "What's
+  open" flagged: adoption is per-service, per-capability, opt-in, with
+  nothing catching an omission). 3 new eunit tests.
+- `scripts/audit-fleet-ucan-adoption.sh`: the other half of that same
+  concern, since the runtime check above can only see what a service's own
+  `capabilities/0` reports. A service that calls `macula:advertise/5`,
+  `macula_response:advertise_direct/7` or `macula_streamer:advertise_direct/7`
+  directly -- bypassing `hecate_om_capabilities:register/1` entirely, the
+  pre-migration `hecate-rag` pattern this repo's own history already
+  documents fixing for one service -- is advertising something the
+  in-process audit never sees at all. This script greps every sibling
+  `hecate-services/*` repo's real source (umbrella-app-aware: recursive,
+  not a literal top-level `src/` glob, which silently missed every
+  umbrella-structured repo the first time this was written) for that
+  bypass pattern, excluding test fixtures. Run 2026-09-03 against the real
+  fleet: 7 services (`hecate-dns`, `hecate-dronex`, `hecate-embedder`,
+  `hecate-git`, `hecate-llm`, `hecate-tom-ocean`, `hecate-tom-world`)
+  still advertise at least one capability outside this module's own
+  registration path -- flagged for manual review, not fixed here; each
+  needs its own migration decision, not a blind sweep.
+
 ### Fixed
 
 - The `hecate_service` scaffold's `lint.yml` now installs a Rust toolchain

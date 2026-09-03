@@ -123,7 +123,8 @@
 %% mesh.
 -export([procedure_uri/3, org_procedure/2, build_advertisement/5,
          build_advertisement/6, decode_resolved/1, station_url/2,
-         has_handler/1, auth_opts/1, reuse_sup_opts/1, advertise_opts/1,
+         has_handler/1, auth_opts/1, unguarded_capabilities/1,
+         reuse_sup_opts/1, advertise_opts/1,
          provider_module/1, stream_opts/1,
          discovery_key/2, discovery_key_org/3,
          org_scoped_or_any/4, org_scoped_full_or_any/5,
@@ -258,6 +259,7 @@ init([]) ->
     {ok, arm_timer(#state{})}.
 
 handle_call({register, Caps}, _From, #state{advertise_sups = Sups} = S) ->
+    log_unguarded(Caps),
     NewSups = do_advertise(Caps, Sups),
     {reply, ok, S#state{capabilities = Caps, advertise_sups = NewSups}};
 
@@ -290,6 +292,26 @@ handle_info(_Other, S) ->
 terminate(_, _) -> ok.
 
 %%% Internals — advertise (write records / register handlers)
+
+%% Logged once per `register/1' call (boot, or an explicit
+%% re-registration — never on a republish timer tick, `publish/0'/
+%% `handle_info(republish, ...)' both reuse the already-registered
+%% `Caps' without calling this again) — see `unguarded_capabilities/1'
+%% for exactly what this can and can't see.
+log_unguarded(Caps) ->
+    case unguarded_capabilities(Caps) of
+        []        -> ok;
+        Unguarded ->
+            logger:warning(
+              "hecate_om_capabilities: ~p capabilit~s registered with no "
+              "explicit auth policy, defaulting to open: ~p -- set "
+              "auth => open to confirm that's intended, or auth => "
+              "{ucan_required, IssuerPubkey} to gate it",
+              [length(Unguarded), plural_suffix(Unguarded), Unguarded])
+    end.
+
+plural_suffix([_]) -> "y was";
+plural_suffix(_)   -> "ies were".
 
 do_advertise(Caps, Sups) ->
     advertise_with(hecate_om_identity:macula_client(),
@@ -367,6 +389,30 @@ has_handler(_) -> false.
 -spec auth_opts(hecate_om_service:capability()) -> map().
 auth_opts(#{auth := Policy}) -> #{auth => Policy};
 auth_opts(_)                 -> #{}.
+
+%% @doc The names of every capability in `Caps' with no explicit `auth'
+%% key -- i.e. every one that will silently advertise `open' via
+%% `auth_opts/1''s own default, whether that policy was actually
+%% decided or simply never set. Pure and unit-testable without a live
+%% mesh, matching this module's other pure helpers.
+%%
+%% This can only see what a service's own `capabilities/0' reports --
+%% `register/1' warns about exactly this list on every registration
+%% (see `log_unguarded_once/1'), giving free, per-boot visibility to
+%% every service that routes through this module. It cannot see a
+%% capability a service advertises out-of-band via its own direct
+%% `macula:advertise/5'/`macula_response:advertise_direct/7' call
+%% instead of declaring it here -- `capabilities/0' under-reporting is
+%% the pre-migration `hecate-rag' pattern this module's own moduledoc
+%% already documents fixing for one service, not yet audited fleet-wide.
+%% See `scripts/audit-fleet-ucan-adoption.sh' for that separate,
+%% source-scan half of the check.
+-spec unguarded_capabilities([hecate_om_service:capability()]) -> [binary()].
+unguarded_capabilities(Caps) ->
+    [Name || #{name := Name} = Cap <- Caps, not has_auth(Cap)].
+
+has_auth(#{auth := _}) -> true;
+has_auth(_)            -> false.
 
 %% @doc Which macula provider module advertises `Cap''s handler --
 %% `macula_streamer' only when the capability opts in with `kind =>
