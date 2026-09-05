@@ -5,6 +5,25 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- `hecate_om_service:read_model_ttl_sweep/0` (optional callback): a
+  service can now arm barrel_docdb's native per-document TTL sweeper on
+  its own read model -- `disabled` (default, unchanged behavior for every
+  existing service) or `#{interval_ms := pos_integer(), batch :=
+  pos_integer()}`. `hecate_om:boot/1` threads it into the database's
+  `create_db` config via `hecate_om_read_model:ensure/3` (`ensure/2` still
+  works, now a thin wrapper defaulting to `disabled`). Arming the sweeper
+  only reclaims disk for documents that already carry `expires_at` in
+  their own `put_doc/3` options -- barrel_docdb treats those as gone on
+  read unconditionally regardless of this config (see
+  `barrel_docdb_reader:expired/1`'s own doc comment); this setting only
+  controls whether the background timer exists to turn that lazy expiry
+  into a real, space-reclaiming tombstone. Motivated by hecate-agora's
+  storage-retention design, where hand-rolling scan-and-delete would have
+  duplicated a primitive barrel_docdb (`~> 1.3`, already the pinned
+  dependency) already provides natively.
+
 ## [0.24.0] - 2026-09-05
 
 ### Fixed

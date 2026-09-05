@@ -117,6 +117,21 @@
      "may have a read model, an event store, both, or neither.".
 -callback read_model_id() -> binary().
 
+-doc "OPTIONAL. The barrel_docdb TTL sweep config for this service's read "
+     "model: `disabled' (default, no automatic expiry -- today's behavior "
+     "for every service), or `#{interval_ms := pos_integer(), batch := "
+     "pos_integer()}' to turn on barrel_docdb's native per-document TTL "
+     "sweeper. `interval_ms' is how often it folds the expiry index; "
+     "`batch' caps how many due documents it hard-deletes per pass. This "
+     "only arms the sweeper -- a document still needs `expires_at' set "
+     "(a unix-ms deadline) in its own `put_doc/3' `Opts' to ever expire; "
+     "omitting it on a write preserves whatever expiry the document "
+     "already had. When exported alongside read_model_id/0 + data_dir/0, "
+     "hecate_om:boot/1 threads this into the database's create_db config. "
+     "Omit for a read model where nothing expires.".
+-callback read_model_ttl_sweep() -> disabled | #{interval_ms := pos_integer(),
+                                                 batch := pos_integer()}.
+
 -doc "OPTIONAL. Topics this service subscribes to at boot: a list of "
      "{Topic, HandlerModule, Args} triples, HandlerModule implementing "
      "the `macula_subscriber' behaviour. hecate_om:boot/1 wires each "
@@ -129,4 +144,5 @@
 -callback subscriptions() -> [{binary(), module(), term()}].
 
 -optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0,
-                     store_integrity/0, read_model_id/0, subscriptions/0]).
+                     store_integrity/0, read_model_id/0,
+                     read_model_ttl_sweep/0, subscriptions/0]).

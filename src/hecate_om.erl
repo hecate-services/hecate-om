@@ -132,15 +132,25 @@ maybe_wire_read_model(ServiceMod) ->
 wire_read_model(false, _ServiceMod) ->
     ok;
 wire_read_model(true, ServiceMod) ->
-    DbName  = ServiceMod:read_model_id(),
-    DataDir = ServiceMod:data_dir(),
+    DbName   = ServiceMod:read_model_id(),
+    DataDir  = ServiceMod:data_dir(),
+    TtlSweep = read_model_ttl_sweep(ServiceMod),
     persistent_term:put(?READ_MODEL_KEY, DbName),
-    ensured_read_model(hecate_om_read_model:ensure(DbName, DataDir), ServiceMod).
+    ensured_read_model(hecate_om_read_model:ensure(DbName, DataDir, TtlSweep), ServiceMod).
 
 ensured_read_model(ok, _ServiceMod) ->
     ok;
 ensured_read_model({error, Why}, ServiceMod) ->
     error({hecate_om_read_model_failed, ServiceMod, Why}).
+
+%% Optional read_model_ttl_sweep/0 callback: barrel_docdb's native per-doc
+%% TTL sweep config for the read model, `disabled' by default (no expiry,
+%% backward compatible with every service that doesn't export it).
+read_model_ttl_sweep(ServiceMod) ->
+    case erlang:function_exported(ServiceMod, read_model_ttl_sweep, 0) of
+        true  -> ServiceMod:read_model_ttl_sweep();
+        false -> disabled
+    end.
 
 -spec service_module() -> module() | undefined.
 service_module() ->
