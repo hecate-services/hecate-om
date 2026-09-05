@@ -5,6 +5,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-09-05
+
 ### Fixed
 
 - `hecate_service` scaffold now generates a `.tool-versions` pinning
