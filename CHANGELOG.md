@@ -5,6 +5,23 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- `hecate_service` scaffold now generates a `.tool-versions` pinning
+  `erlang 28.4.2`, matching the OTP major (28) `Containerfile` and
+  `lint.yml` already pinned. Without it, a generated repo built on a dev
+  machine whose asdf/rebar3 global points at a newer OTP (29) compiles a
+  dependency's deprecated bare-`catch` syntax under a version that turns
+  it into a hard build failure via `warnings_as_errors` -- unrelated to
+  the generated service's own code, and reproducing nowhere the pin is
+  honored (CI, the container build, or a machine that has this file).
+  Hit the same missing-pin symptom in four repos in one day before
+  landing the fix here (reckon-db and evoq, unrelated to this scaffold
+  but the same root cause; then two real `hecate_service`-generated
+  services, hecate-sentinel and hecate-echo). This repo itself was a
+  fifth, having no `.tool-versions` of its own despite depending on the
+  same 28-pinned toolchain -- fixed alongside the template.
+
 ### Added
 
 - `hecate_om_capabilities:unguarded_capabilities/1` (exported, pure): names
