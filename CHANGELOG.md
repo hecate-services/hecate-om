@@ -7,6 +7,26 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- `hecate_om_service:capability/0`'s `auth` field now includes
+  `{realm_member_required, RealmDid, RequiredCan}` -- `macula` added this
+  policy after `PLAN_UCAN_GATED_CAPABILITIES.md` was written and called
+  the realm-membership case unbuilt; `hecate_om_capabilities:auth_opts/1`
+  needed no code change at all (it was already policy-agnostic), only
+  the stale type and moduledoc did. New eunit test
+  (`auth_opts_carries_a_realm_member_required_policy_test`) pins the
+  round-trip. See the plan doc's own 2026-09-08 update.
+- `hecate_om_service:describe_rpc_capabilities/0` +
+  `describe_pubsub_capabilities/0` (both optional): human-facing
+  documentation for a service's capabilities/topics, distinct from
+  `capabilities/0`'s/`subscriptions/0`'s own dispatch-wiring-only
+  metadata. When either is exported, `hecate_om:boot/2` advertises a
+  synthetic `<service-name>.describe_capabilities` RPC
+  (`hecate_om_describe`, stateless -- reads `hecate_om:service_module/0`)
+  that returns both lists live. Motivating cost this closes:
+  `macula-lazymesh`'s `MeshServices` catalog hand-maintains a hardcoded
+  description list today purely because there was nowhere on the mesh to
+  pull this metadata from.
+
 - `hecate_om_service:read_model_ttl_sweep/0` (optional callback): a
   service can now arm barrel_docdb's native per-document TTL sweeper on
   its own read model -- `disabled` (default, unchanged behavior for every

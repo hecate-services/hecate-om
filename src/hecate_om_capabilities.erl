@@ -38,18 +38,31 @@
 %%% callable via `call_capability', kept for a capability another
 %%% mechanism serves.
 %%%
-%%% A handler-bearing capability may also carry `auth => {ucan_required,
-%%% IssuerPubkey}' (default, and every existing caller's behavior:
-%%% `open') — forwarded via `auth_opts/1' into BOTH `advertise_direct'
-%%% calls' `Opts', through to `macula:advertise/5' and enforced on every
-%%% inbound call by `macula_station_link''s `authorize_policy/2'. This
-%%% is a direct-signature check against ONE pre-known issuer, not a
-%%% delegation-chain walk to a realm root — it fits "only this one known
-%%% identity may call this capability" (an operator-only capability like
-%%% a corpus-mutating one), not yet "anyone whose UCAN traces back to a
-%%% trusted realm root, however many hops deep." See
-%%% `macula-mcp/plans/PLAN_AGENT_IDENTITY_UCAN.md' for the caller side of
-%%% that larger, separate gap.
+%%% A handler-bearing capability may also carry an `auth' policy —
+%%% `open' (default, and every existing caller's behavior before this
+%%% key existed), `{ucan_required, IssuerPubkey}', or
+%%% `{realm_member_required, RealmDid, RequiredCan}' — forwarded via
+%%% `auth_opts/1' into BOTH `advertise_direct' calls' `Opts', through to
+%%% `macula:advertise/5' and enforced on every inbound call by
+%%% `macula_station_link''s `authorize_policy/2'.
+%%%
+%%% `{ucan_required, IssuerPubkey}' is a direct-signature check against
+%%% ONE pre-known issuer, not a delegation-chain walk — it fits "only
+%%% this one known identity may call this capability" (an operator-only
+%%% capability like a corpus-mutating one).
+%%%
+%%% `{realm_member_required, RealmDid, RequiredCan}' is the
+%%% "anyone whose UCAN traces back to a trusted realm root" case
+%%% `ucan_required' does not cover: a valid token signed by the realm's
+%%% own DID (RealmDid — an Ed25519 keypair the realm holds, NOT the
+%%% 32-byte `RealmId' routing/scoping hash used elsewhere) whose
+%%% audience is the wire-authenticated caller itself, at the specific
+%%% membership tier `RequiredCan' names (mandatory, no default — a
+%%% realm mints membership at more than one tier from the same signing
+%%% key, see `macula_client:auth_policy/0''s own moduledoc for why a
+%%% caller must name the tier it actually needs). See
+%%% `macula-mcp/plans/PLAN_AGENT_IDENTITY_UCAN.md' for the caller side
+%%% of presenting a token shaped for either policy.
 %%%
 %%% `call_capability/5,7' resolves `CapName' under `Org' first
 %%% (`discovery_key_org/3'), falling back to the bare (any-provider) key
@@ -305,8 +318,10 @@ log_unguarded(Caps) ->
             logger:warning(
               "hecate_om_capabilities: ~p capabilit~s registered with no "
               "explicit auth policy, defaulting to open: ~p -- set "
-              "auth => open to confirm that's intended, or auth => "
-              "{ucan_required, IssuerPubkey} to gate it",
+              "auth => open to confirm that's intended, auth => "
+              "{ucan_required, IssuerPubkey} to gate it to one exact "
+              "identity, or auth => {realm_member_required, RealmDid, "
+              "RequiredCan} to gate it to a realm membership tier",
               [length(Unguarded), plural_suffix(Unguarded), Unguarded])
     end.
 
@@ -380,12 +395,17 @@ has_handler(_) -> false.
 
 %% @doc The `auth' entry to merge into `advertise_direct''s `Opts', from
 %% a capability's own optional `auth' key (`open' | `{ucan_required,
-%% Issuer}', forwarded all the way to `macula_station_link''s inbound
-%% call authorization — see moduledoc). Absent when the capability
-%% doesn't set one, matching `macula:advertise/5''s own default: open.
-%% A hecate-service opts a specific capability into gating by adding
-%% `auth => {ucan_required, IssuerPubkey}' to that capability's map;
-%% every other capability advertised through this module is unaffected.
+%% Issuer}' | `{realm_member_required, RealmDid, RequiredCan}',
+%% forwarded all the way to `macula_station_link''s inbound call
+%% authorization — see moduledoc). Absent when the capability doesn't
+%% set one, matching `macula:advertise/5''s own default: open. A
+%% hecate-service opts a specific capability into gating by adding the
+%% appropriate `auth' value to that capability's map; every other
+%% capability advertised through this module is unaffected. This
+%% function is deliberately policy-agnostic — it forwards whatever
+%% value `auth' holds without inspecting which variant it is, so a
+%% future policy `macula' adds needs no change here, only to
+%% `hecate_om_service:capability/0''s own type.
 -spec auth_opts(hecate_om_service:capability()) -> map().
 auth_opts(#{auth := Policy}) -> #{auth => Policy};
 auth_opts(_)                 -> #{}.

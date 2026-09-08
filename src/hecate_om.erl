@@ -43,10 +43,25 @@ boot(ServiceMod, Opts) when is_atom(ServiceMod), is_map(Opts) ->
     persistent_term:put(?SERVICE_MODULE_KEY, ServiceMod),
     ok = maybe_wire_store(ServiceMod),
     ok = maybe_wire_read_model(ServiceMod),
-    ok = hecate_om_capabilities:register(ServiceMod:capabilities()),
+    ok = hecate_om_capabilities:register(capabilities_with_describe(ServiceMod)),
     ok = maybe_wire_subscriptions(ServiceMod),
     ok = hecate_om_health:register(ServiceMod),
     ServiceMod:start(Opts).
+
+%% @private ServiceMod's own declared capabilities, plus a synthetic
+%% `<service-name>.describe_capabilities' one when it exports either
+%% `describe_rpc_capabilities/0' or `describe_pubsub_capabilities/0'
+%% (see hecate_om_describe:capability_for/2) -- omitted entirely for a
+%% service that exports neither, same "optional means genuinely absent,
+%% not present-but-empty" contract every other optional callback here
+%% already has.
+capabilities_with_describe(ServiceMod) ->
+    #{name := ServiceName} = ServiceMod:info(),
+    Caps = ServiceMod:capabilities(),
+    add_describe_capability(hecate_om_describe:capability_for(ServiceMod, ServiceName), Caps).
+
+add_describe_capability(undefined, Caps)     -> Caps;
+add_describe_capability(DescribeCap, Caps)   -> [DescribeCap | Caps].
 
 %% @private When the service module exports subscriptions/0, wire each
 %% declared {Topic, HandlerMod, Args} into a supervised macula_subscriber

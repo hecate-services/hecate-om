@@ -37,7 +37,9 @@
 %% which module gets called, nothing else about advertisement.
 -type capability()     :: #{name := binary(), version := pos_integer(),
                             handler => {module(), term()},
-                            auth => open | {ucan_required, <<_:256>>},
+                            auth => open
+                                  | {ucan_required, <<_:256>>}
+                                  | {realm_member_required, <<_:256>>, binary()},
                             kind => response | streamer,
                             stream_opts => #{mode => server_stream | client_stream}}.
 -type identity_spec()  :: #{scope := binary(),
@@ -143,6 +145,46 @@
      "and starts/stops only the delta.".
 -callback subscriptions() -> [{binary(), module(), term()}].
 
+%% Human-facing, NOT dispatch-wiring: `capability()' (above) is exactly
+%% enough for `hecate_om_capabilities' to advertise and route a call,
+%% and deliberately carries nothing about what a capability actually
+%% DOES or what a topic's payload looks like. `rpc_capability_doc()' /
+%% `pubsub_capability_doc()' are that missing layer -- real evidence of
+%% its cost: `macula-lazymesh''s `MeshServices' catalog hand-maintains a
+%% hardcoded, hand-written-description list of other services'
+%% procedures today purely because there is nowhere on the mesh to pull
+%% that metadata from live.
+-type rpc_capability_doc()    :: #{name := binary(), description := binary(),
+                                   params => [binary()],
+                                   example_payload => map()}.
+-type pubsub_capability_doc() :: #{topic := binary(), description := binary(),
+                                   payload_shape => map()}.
+
+-export_type([rpc_capability_doc/0, pubsub_capability_doc/0]).
+
+-doc "OPTIONAL. Human-facing documentation for this service's RPC "
+     "capabilities -- name, a plain-language description, and "
+     "optionally the params a caller sends / an example payload. "
+     "Distinct from capabilities/0's own dispatch-wiring metadata "
+     "(name/version/handler/auth/kind), which says how to route a "
+     "call, never what it does. When exported (alongside either this "
+     "or describe_pubsub_capabilities/0), hecate_om:boot/1 advertises "
+     "a synthetic `<service-name>.describe_capabilities' RPC that "
+     "returns both lists live -- so a mesh consumer (e.g. a tooling "
+     "catalog) can call it instead of hand-maintaining descriptions.".
+-callback describe_rpc_capabilities() -> [rpc_capability_doc()].
+
+-doc "OPTIONAL. Human-facing documentation for the pubsub topics this "
+     "service publishes or subscribes to -- topic name, a "
+     "plain-language description, and optionally the payload shape. "
+     "Distinct from subscriptions/0, which wires actual subscriber "
+     "processes and carries no description. See "
+     "describe_rpc_capabilities/0's own doc for how this is exposed on "
+     "the mesh once exported.".
+-callback describe_pubsub_capabilities() -> [pubsub_capability_doc()].
+
 -optional_callbacks([store_id/0, data_dir/0, store_indexes/0, store_mode/0,
                      store_integrity/0, read_model_id/0,
-                     read_model_ttl_sweep/0, subscriptions/0]).
+                     read_model_ttl_sweep/0, subscriptions/0,
+                     describe_rpc_capabilities/0,
+                     describe_pubsub_capabilities/0]).

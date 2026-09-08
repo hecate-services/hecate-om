@@ -1,9 +1,38 @@
 # PLAN: UCAN-gated mesh capabilities, shared instead of hand-rolled
 
-Status: **Implemented.** `hecate_om_capabilities:register/1` accepts an
-`auth` key per capability; 33 tests pass in this module (85 across the
-app), dialyzer clean. What's left is per-service adoption — see "What's
+Status: **Implemented**, extended 2026-09-08 to a policy this plan's own
+"What's open" section had called unbuilt. `hecate_om_capabilities:register/1`
+accepts an `auth` key per capability; the shared path (`auth_opts/1`) was
+already policy-agnostic, so adding the new variant to
+`hecate_om_service:capability/0''s type was the whole fix — see "Update,
+2026-09-08" below. What's left is per-service adoption — see "What's
 open."
+
+## Update, 2026-09-08: `realm_member_required` closes the gap this plan called unbuilt
+
+This plan's own "What's open" (below, kept for history) said plainly:
+"the fuller `HECATE_AUTH_MODEL.md' vision (any realm member's individually
+delegated, revocable agent) needs... chain-walking verification, which
+doesn't exist anywhere in `macula` today." That's no longer true —
+`macula` added `{realm_member_required, RealmDid, RequiredCan}` to
+`macula_client:auth_policy/0'`: a valid token signed by the realm's own
+DID, audience-bound to the wire-authenticated caller (closing the same
+bearer gap `ucan_required` doesn't), at a specific, mandatory membership
+tier (a realm mints membership at more than one tier from the same
+signing key — see that type's own moduledoc).
+
+`hecate_om_capabilities:auth_opts/1' needed no change at all: it was
+already written to forward whatever value a capability's `auth' key
+holds without inspecting which variant it is (see its own doc). The only
+real gap was `hecate_om_service:capability/0''s own type, which still
+enumerated only `open | {ucan_required, _}' — a hecate-nvidia-pair
+implementation the same day used `{realm_member_required, ...}' by
+bypassing this module entirely (calling `macula:advertise/5' itself),
+purely because the type made it look unsupported through the normal
+path. Fixed: the type now includes the third variant, this module's own
+moduledoc explains both gated policies, and a new eunit test
+(`auth_opts_carries_a_realm_member_required_policy_test`) pins that it
+round-trips identically to the other two.
 
 **Rollout-safety follow-on (2026-09-03, same repo):**
 `hecate_om_capabilities:unguarded_capabilities/1` + `scripts/audit-fleet-ucan-adoption.sh`
@@ -98,9 +127,9 @@ hecate-service already has available, not a hand-rolled one.
   `prune_chunks`, `schedule_reembed` — corpus-mutating, operator-only —
   not `answer_query` or `search_chunks_semantic`, which should stay
   open.
-- **The confirmed boundary stands**: `{ucan_required, Issuer}` gates to
-  one exact identity by direct signature, not a human-membership-rooted
-  chain of arbitrary delegation depth. The fuller `HECATE_AUTH_MODEL.md`
-  vision (any realm member's individually delegated, revocable agent)
-  needs that chain-walking verification, which doesn't exist anywhere
-  in `macula` today — a different, larger, unscoped piece of work.
+- **Superseded by the 2026-09-08 update above**: `{ucan_required, Issuer}`
+  still gates to one exact identity by direct signature only, but the
+  "any realm member" case this bullet called unbuilt now has a real
+  primitive (`realm_member_required`) — see that update for what it
+  covers and what it still doesn't (a *tier*, not arbitrary delegation
+  depth within a tier).

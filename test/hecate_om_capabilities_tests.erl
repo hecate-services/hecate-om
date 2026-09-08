@@ -353,6 +353,22 @@ auth_opts_carries_a_ucan_required_policy_test() ->
                      handler => {my_mod, []},
                      auth => {ucan_required, Issuer}})).
 
+%% `macula_client:auth_policy/0' gained this variant after
+%% PLAN_UCAN_GATED_CAPABILITIES.md's own "Implemented" note was
+%% written (that plan explicitly called chain-walking-to-a-realm-root
+%% verification unbuilt "anywhere in macula today" -- no longer true).
+%% auth_opts/1 is policy-agnostic by design (see its own doc), so this
+%% pins that the THIRD variant round-trips identically to the other
+%% two, not just that the first two still do.
+auth_opts_carries_a_realm_member_required_policy_test() ->
+    RealmDid = <<0:256>>,
+    RequiredCan = <<"member/email-verified">>,
+    ?assertEqual(#{auth => {realm_member_required, RealmDid, RequiredCan}},
+                 hecate_om_capabilities:auth_opts(
+                   #{name => <<"svc.chat">>, version => 1,
+                     handler => {my_mod, []},
+                     auth => {realm_member_required, RealmDid, RequiredCan}})).
+
 %%% unguarded_capabilities/1: which of a service's own declared
 %%% capabilities have no explicit auth key at all -- register/1 logs
 %%% exactly this list at boot (see hecate_om_capabilities' own
