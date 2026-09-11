@@ -32,6 +32,10 @@
 -export([start_link/0]).
 -export([init/1]).
 
+-ifdef(TEST).
+-export([health_socket_opts/2]).
+-endif.
+
 start_link() ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
@@ -81,16 +85,30 @@ mesh_pool_child() ->
 %% unhealthy to Podman/k8s. Returns [] (no listener) when no `health_port' is
 %% configured, so a service that does not want an HTTP health endpoint simply
 %% omits the config.
+%%
+%% `health_ip' (optional) is the address the listener binds: a string such as
+%% "127.0.0.1" or an address tuple. Unset or empty, it binds every interface.
 health_listener() ->
-    case application:get_env(hecate_om, health_port) of
-        {ok, Port} when is_integer(Port), Port > 0 ->
-            Dispatch = cowboy_router:compile([{'_', hecate_om_health_handler:routes()}]),
-            [ranch:child_spec(hecate_om_health_http,
-                              ranch_tcp, [{port, Port}],
-                              cowboy_clear, #{env => #{dispatch => Dispatch}})];
-        _ ->
-            []
-    end.
+    health_listener(application:get_env(hecate_om, health_port),
+                    application:get_env(hecate_om, health_ip, undefined)).
+
+health_listener({ok, Port}, Ip) when is_integer(Port), Port > 0 ->
+    Dispatch = cowboy_router:compile([{'_', hecate_om_health_handler:routes()}]),
+    [ranch:child_spec(hecate_om_health_http,
+                      ranch_tcp, health_socket_opts(Port, Ip),
+                      cowboy_clear, #{env => #{dispatch => Dispatch}})];
+health_listener(_NoPort, _Ip) ->
+    [].
+
+health_socket_opts(Port, Unset) when Unset =:= undefined; Unset =:= ""; Unset =:= <<>> ->
+    [{port, Port}];
+health_socket_opts(Port, Ip) when is_binary(Ip) ->
+    health_socket_opts(Port, binary_to_list(Ip));
+health_socket_opts(Port, Ip) when is_list(Ip) ->
+    {ok, Address} = inet:parse_address(Ip),
+    [{port, Port}, {ip, Address}];
+health_socket_opts(Port, Ip) when is_tuple(Ip) ->
+    [{port, Port}, {ip, Ip}].
 
 worker(Module) ->
     #{
