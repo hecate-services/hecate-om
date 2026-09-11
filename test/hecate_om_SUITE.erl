@@ -29,27 +29,33 @@ end_per_suite(_Config) ->
     ok.
 
 behaviour_attributes(_Config) ->
-    %% hecate_om_service declares 6 required callbacks + 8 optional ones
+    %% hecate_om_service declares 6 required callbacks + 10 optional ones
     %% (store_id/0, data_dir/0, store_indexes/0, store_mode/0,
     %% store_integrity/0, read_model_id/0, read_model_ttl_sweep/0,
     %% subscriptions/0) for CMD/PRJ services that wire a reckon-db store, a
     %% barrel_docdb read model, and/or a declarative pubsub subscription
-    %% set. behaviour_info(callbacks) returns all 14.
+    %% set, plus describe_rpc_capabilities/0 and
+    %% describe_pubsub_capabilities/0 for the describe_capabilities RPC.
+    %% behaviour_info(callbacks) returns all 16.
     Callbacks = hecate_om_service:behaviour_info(callbacks),
-    ?assertEqual(14, length(Callbacks)),
+    ?assertEqual(16, length(Callbacks)),
     Names = lists:sort(lists:map(fun({N, _A}) -> N end, Callbacks)),
     Expected = lists:sort([info, start, stop, health, capabilities,
                            identity_spec, store_id, data_dir, store_indexes,
                            store_mode, store_integrity, read_model_id,
-                           read_model_ttl_sweep, subscriptions]),
+                           read_model_ttl_sweep, subscriptions,
+                           describe_rpc_capabilities,
+                           describe_pubsub_capabilities]),
     ?assertEqual(Expected, Names),
-    %% The store-wiring, read-model-wiring, and subscriptions callbacks
-    %% must be the optional set.
+    %% The store-wiring, read-model-wiring, subscriptions and describe
+    %% callbacks must be the optional set.
     Optional = lists:sort(hecate_om_service:behaviour_info(optional_callbacks)),
     ?assertEqual(lists:sort([{store_id, 0}, {data_dir, 0},
                              {store_indexes, 0}, {store_mode, 0},
                              {store_integrity, 0}, {read_model_id, 0},
-                             {read_model_ttl_sweep, 0}, {subscriptions, 0}]),
+                             {read_model_ttl_sweep, 0}, {subscriptions, 0},
+                             {describe_rpc_capabilities, 0},
+                             {describe_pubsub_capabilities, 0}]),
                  Optional).
 
 boot_dummy_service(_Config) ->
