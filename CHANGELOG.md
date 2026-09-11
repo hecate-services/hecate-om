@@ -61,6 +61,14 @@ Versioning: [SemVer](https://semver.org/).
   now the atom form, the binary form, then `{text, Bin}`. Releases that
   boot in embedded mode hid this, because every module a service names is
   loaded, and so every atom exists, before the first call arrives.
+- `hecate_om_identity` generates a keypair only when the configured
+  `identity_key_path` file is missing (`{error, enoent}`). Any other load
+  failure now stops the service with `{identity_key_unloadable, Path,
+  Reason}` and leaves the file untouched: a corrupt file, a directory or
+  unreadable file at the path, or a key file readable by group or others,
+  which the next macula release refuses to load. Before, every load error
+  generated a new keypair and saved it over the old file, so the service
+  silently came back under a new node id and its real key was gone.
 
 ## [0.24.0] - 2026-09-05
 

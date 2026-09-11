@@ -183,12 +183,19 @@ safe_call(Msg) ->
     end.
 
 init([]) ->
+    init_with_keypair(load_keypair()).
+
+%% A configured key file that exists but will not load stops this process,
+%% and with it `hecate_om_sup' and the service, with the load error. See
+%% load_keypair/0 for why that beats generating a replacement.
+init_with_keypair({error, Reason}) ->
+    {stop, Reason};
+init_with_keypair(KeyPair) ->
     Cert  = case load_cert() of
         {ok, C}    -> C;
         {error, _} -> undefined
     end,
     Realm   = load_realm(),
-    KeyPair = load_keypair(),
     Org     = load_org(),
     {ok, #state{cert = Cert, realm = Realm,
                 keypair = KeyPair, org = Org,
@@ -320,16 +327,25 @@ start_mesh_pool() ->
 %% (hecate-tube's `tube_mesh_providers' retried forever, `keypair/0'
 %% never resolving, until this existed).
 %%
-%% Self-heals rather than requiring out-of-band provisioning: any load
-%% failure (missing file — the common case, first boot — or a corrupt
-%% one) generates a fresh keypair and persists it to the configured
-%% path via `macula_identity:save/2', which `ensure_dir's the path
-%% itself. Same pattern macula-realm's own mesh identity already
-%% uses. Falls back to `undefined' only if the save itself fails
-%% (e.g. a read-only filesystem).
+%% First boot needs no out-of-band provisioning: a MISSING key file
+%% (`{error, enoent}') generates a fresh keypair and persists it to the
+%% configured path via `macula_identity:save/2', which `ensure_dir's the
+%% path itself. Falls back to `undefined' only if that save fails (e.g. a
+%% read-only filesystem).
+%%
+%% Any OTHER load failure returns `{error, {identity_key_unloadable, Path,
+%% Reason}}', which stops the service and leaves the file untouched: a
+%% corrupt file, a directory or unreadable file at the path, or (from the
+%% macula release that refuses them) a key file readable by group or
+%% others. Generating a replacement there would give the service a new
+%% node id and overwrite its real key on disk, turning a fixable
+%% permissions or disk problem into a silent identity change.
 load_keypair() ->
     keypair_from(application:get_env(hecate_om, identity_key_path)).
 
+-spec keypair_from({ok, file:filename_all()} | undefined) ->
+    macula_identity:key_pair() | undefined |
+    {error, {identity_key_unloadable, file:filename_all(), term()}}.
 keypair_from({ok, Path}) ->
     loaded_or_generated(macula_identity:load(Path), Path);
 keypair_from(undefined) ->
@@ -337,8 +353,10 @@ keypair_from(undefined) ->
 
 loaded_or_generated({ok, Kp}, _Path) ->
     Kp;
-loaded_or_generated({error, _Reason}, Path) ->
-    generate_and_save(Path).
+loaded_or_generated({error, enoent}, Path) ->
+    generate_and_save(Path);
+loaded_or_generated({error, Reason}, Path) ->
+    {error, {identity_key_unloadable, Path, Reason}}.
 
 %% Puzzle-hardened (mirrors macula-realm's own mesh identity, see
 %% MaculaRealm.Mesh.mesh_identity/0): every station in this fleet

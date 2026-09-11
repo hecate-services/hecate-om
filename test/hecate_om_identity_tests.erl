@@ -1,9 +1,11 @@
 %%% Unit tests for hecate_om_identity: keypair resolution
-%%% (hecate_om_identity:keypair_from/1) -- self-healing generate-on-
-%%% missing behavior. Confirmed live: without this, a service whose
-%%% job is a direct-dial RPC/Streaming provider (hecate-tube) silently
-%%% never advertises anything -- keypair/0 stays {error, no_keypair}
-%%% forever, unless something out-of-band provisions the file first.
+%%% (hecate_om_identity:keypair_from/1) -- generate on a MISSING key file,
+%%% refuse any other load failure. Confirmed live: without generate-on-
+%%% missing, a service whose job is a direct-dial RPC/Streaming provider
+%%% (hecate-tube) silently never advertises anything -- keypair/0 stays
+%%% {error, no_keypair} forever, unless something out-of-band provisions
+%%% the file first. Generating on any OTHER failure would silently replace
+%%% the service's identity, so those stop the service instead.
 %%% Also configured_seeds/0 (piece A) and the non-raising accessor
 %%% contract (piece H) -- see PLAN_HECATE_OM_MESH_WRAPPERS.md.
 -module(hecate_om_identity_tests).
@@ -46,17 +48,75 @@ existing_keypair_is_loaded_not_regenerated_test() ->
     ?assertEqual(Original, Loaded),
     file:delete(Path).
 
-corrupt_keypair_file_self_heals_test() ->
+%% A key file that exists but will not load is refused and left untouched.
+%% Regenerating would give the service a new node id and overwrite its
+%% real key: macula's next release refuses key files readable by group or
+%% others, so a permissions mistake would otherwise become a silent
+%% identity change. Works as a red case on today's macula too.
+corrupt_keypair_file_is_refused_and_left_untouched_test() ->
     Path = tmp_path(),
     ok = filelib:ensure_dir(Path),
     ok = file:write_file(Path, <<"not a real key file">>),
 
-    KeyPair = hecate_om_identity:keypair_from({ok, Path}),
-
-    ?assertMatch(#{public := _, private := _}, KeyPair),
-    ?assertEqual({ok, KeyPair}, macula_identity:load(Path)),
-    ?assert(macula_identity:puzzle_valid(macula_identity:public(KeyPair))),
+    ?assertMatch({error, {identity_key_unloadable, Path, _}},
+                 hecate_om_identity:keypair_from({ok, Path})),
+    ?assertEqual({ok, <<"not a real key file">>}, file:read_file(Path)),
     file:delete(Path).
+
+%% Same refusal for a path that exists but is no key file at all. Unlike
+%% an unreadable-mode file, this stays a real case when tests run as root.
+key_path_that_is_a_directory_is_refused_test() ->
+    Path = tmp_path(),
+    ok = file:make_dir(Path),
+
+    ?assertMatch({error, {identity_key_unloadable, Path, _}},
+                 hecate_om_identity:keypair_from({ok, Path})),
+    ?assert(filelib:is_dir(Path)),
+    ?assertEqual({ok, []}, file:list_dir(Path)),
+    file:del_dir(Path).
+
+%% At boot the refusal stops hecate_om_identity itself, so hecate_om_sup,
+%% and with it the service, does not start -- and the file stays as it was.
+unloadable_key_file_stops_the_identity_process_test_() ->
+    {setup, fun corrupt_key_configured/0, fun restore_key_config/1,
+     fun({Path, _Saved}) ->
+        [?_assertMatch({error, {identity_key_unloadable, Path, _}}, start_in_helper()),
+         ?_assertEqual({ok, <<"not a real key file">>}, file:read_file(Path)),
+         ?_assertEqual(undefined, whereis(hecate_om_identity))]
+     end}.
+
+corrupt_key_configured() ->
+    Running = ensure_identity_not_running(),
+    SavedPath = application:get_env(hecate_om, identity_key_path),
+    Path = tmp_path(),
+    ok = filelib:ensure_dir(Path),
+    ok = file:write_file(Path, <<"not a real key file">>),
+    ok = application:set_env(hecate_om, identity_key_path, Path),
+    {Path, {Running, SavedPath}}.
+
+restore_key_config({Path, {Running, SavedPath}}) ->
+    restore_key_path(SavedPath),
+    file:delete(Path),
+    restore_identity(Running).
+
+restore_key_path(undefined)  -> application:unset_env(hecate_om, identity_key_path);
+restore_key_path({ok, Path}) -> application:set_env(hecate_om, identity_key_path, Path).
+
+%% start_link/0 from a helper that traps exits, so a refused start
+%% (init/1 returning {stop, _}) can't take the test process down with it.
+start_in_helper() ->
+    Parent = self(),
+    {Pid, Ref} = spawn_monitor(fun() ->
+        process_flag(trap_exit, true),
+        Parent ! {start_result, self(), hecate_om_identity:start_link()}
+    end),
+    receive
+        {start_result, Pid, Result} ->
+            receive {'DOWN', Ref, process, Pid, _} -> ok after 2_000 -> ok end,
+            Result
+    after 10_000 ->
+        timeout
+    end.
 
 %% hecate_om_identity:configured_seeds/0 -- exported for hecate_om_sup's
 %% own use deciding whether the mesh pool child (piece A,
