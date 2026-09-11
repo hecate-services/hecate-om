@@ -121,8 +121,8 @@ hecate_om:call_capability(Org, <<"my_x.echo">>, #{ping => <<"pong">>},
 ```
 
 This resolves the provider from the DHT and dials its serving station
-directly (`macula:call_station/6,7,8` under the hood, not pool-routed
-`macula:call/4`), failing over to the next provider on error. Pass
+directly (`macula:call_station/7` under the hood, not pool-routed
+`macula:call/5`), failing over to the next provider on error. Pass
 `Opts` (via `hecate_om_capabilities:call_capability/5,7`) for
 `verify => true` (drop providers whose embedded cert chain doesn't
 verify to the realm CA) or `ucan_token` (present a capability token to
@@ -467,7 +467,7 @@ Three techniques, in order of how much you should reach for them
    .io`'s demo fleet (`station-de-frankfurt.macula.io`) is documented,
    disposable dev infra safe to hit directly in tests. Every real bug
    pieces A–H's own tests found (a DHT key mismatch, a missing TLS
-   trust triad, a nonexistent `supervisor:stop/1`, a race in a
+   trust triad, a nonexistent supervisor:stop/1, a race in a
    retry-inside-a-dying-callback design) was only found this way —
    budget for at least one test per mesh-facing feature that actually
    round-trips through a real station, not just a mocked one.

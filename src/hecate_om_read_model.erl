@@ -28,7 +28,8 @@ ensure(DbName, DataDir) ->
 %% per-document TTL sweeper when `TtlSweep' is `#{interval_ms := integer(),
 %% batch := integer()}' rather than `disabled'. Arming the sweeper alone
 %% expires nothing — documents also need `expires_at' set in their own
-%% `put_doc/3' `Opts' — see `hecate_om_service:read_model_ttl_sweep/0'.
+%% `put_doc/3' `Opts' — see the `read_model_ttl_sweep/0' callback in
+%% {@link hecate_om_service}.
 -spec ensure(binary(), file:filename_all(),
              disabled | #{interval_ms := pos_integer(), batch := pos_integer()}) ->
     ok | {error, term()}.

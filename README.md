@@ -28,9 +28,9 @@ town/library metaphor that drives the identity choices.
 Every service is a separate OTP release shipped as an OCI container
 to `ghcr.io/hecate-services/`. `hecate-om` is the library they all
 link against to behave consistently on the mesh: the same service
-contract, the same manifest schema, the same health endpoint, the
-same identity-claim flow, the same capability-advertise pattern, the
-same Containerfile + Quadlet templates.
+contract, the same health endpoint, the same identity-claim flow, the
+same capability-advertise pattern, and the same generated repository
+(Containerfile, compose file, CI workflows).
 
 ## What this library is (and isn't)
 
@@ -40,11 +40,12 @@ It **is**:
   service implements: `start/1`, `stop/1`, `health/0`, `capabilities/0`,
   `identity_spec/0`, `info/0`.
 - Helpers for the bits every service needs: load the realm cert,
-  advertise a capability via macula's bloom-channel, serve a `/health`
-  endpoint, parse the standard `manifest.json` schema.
-- Mustache templates for the boilerplate every service repo carries:
-  `Containerfile`, `quadlet/<service>.container`, `manifest.json`,
-  `release_template`.
+  advertise a capability on the mesh as a signed DHT record (callable
+  when it carries a handler), serve a `/health` endpoint.
+- The `hecate_service` rebar3 template for a new service repository:
+  application, supervisor, service module with its eunit suite, release
+  config, `Containerfile`, `compose.yml`, `health.sh` and both CI
+  workflows. See [Scaffold a new service](#scaffold-a-new-service).
 
 It **is not**:
 
@@ -131,10 +132,10 @@ info() ->
     }.
 ```
 
-That's the whole user-side contract. Six small functions. Everything
-else (release tarball, container image, Quadlet unit, manifest, health
-endpoint wiring, mesh advertisement) is provided by `hecate-om` + the
-template generators in `templates/`.
+That's the whole user-side contract. Six small functions. Health
+endpoint wiring and mesh advertisement come from `hecate-om`; the
+release, container image, compose file and CI workflows come from the
+`hecate_service` template described below.
 
 ## Optional: store-backed services
 

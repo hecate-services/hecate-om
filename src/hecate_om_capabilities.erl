@@ -25,9 +25,10 @@
 %%%      2026-08-29: both an acme- and a contoso-targeted call were
 %%%      answered by whichever org's registration was most recent.
 %%%
-%%% `macula_direct_dial:discovery_uri/2' (`RealmHex/Procedure') and this
-%%% module's `procedure_uri/3' (`RealmHex/Org/Name') produce the IDENTICAL
-%%% string when `Procedure = org_procedure(Org, Name)' — so
+%%% The discovery URI macula_direct_dial builds internally
+%%% (`RealmHex/Procedure') and this module's `procedure_uri/3'
+%%% (`RealmHex/Org/Name') produce the IDENTICAL string when
+%%% `Procedure = org_procedure(Org, Name)' — so
 %%% `advertise_direct''s own internal DHT publish already lands the
 %%% org-qualified record at exactly the key `discovery_key_org/3' resolves
 %%% on read. No separate record-only write is needed for the
@@ -59,8 +60,8 @@
 %%% audience is the wire-authenticated caller itself, at the specific
 %%% membership tier `RequiredCan' names (mandatory, no default — a
 %%% realm mints membership at more than one tier from the same signing
-%%% key, see `macula_client:auth_policy/0''s own moduledoc for why a
-%%% caller must name the tier it actually needs). See
+%%% key, see the comment on the auth_policy() type in macula_client for
+%%% why a caller must name the tier it actually needs). See
 %%% `macula-mcp/plans/PLAN_AGENT_IDENTITY_UCAN.md' for the caller side
 %%% of presenting a token shaped for either policy.
 %%%
@@ -89,10 +90,10 @@
 %%% own 75%-of-TTL refresh leaves for stations) instead of the ~48h
 %%% envelope default — a dead service's advertisement should age out on
 %%% the order of minutes, not days. The handler-bearing path's `ttl_ms'
-%%% has no live effect until `macula' ships past 10.11.1 (the fix to
-%%% `macula_direct_dial:adv_opts/1', which silently dropped `ttl_ms'
-%%% before then); the record-only (no-handler) path builds the record
-%%% directly and is unaffected by that gap.
+%%% needs macula 10.11.1 or later: earlier releases dropped `ttl_ms'
+%%% while macula_direct_dial forwarded the advertisement options; the
+%%% record-only (no-handler) path builds the record directly and is
+%%% unaffected by that gap.
 %%%
 %%% `lookup/1' resolves a capability by name: derive the same procedure
 %%% key, read every advertisement stored there, verify each signature,
@@ -404,8 +405,8 @@ has_handler(_) -> false.
 %% capability advertised through this module is unaffected. This
 %% function is deliberately policy-agnostic — it forwards whatever
 %% value `auth' holds without inspecting which variant it is, so a
-%% future policy `macula' adds needs no change here, only to
-%% `hecate_om_service:capability/0''s own type.
+%% future policy `macula' adds needs no change here, only to the
+%% {@link hecate_om_service:capability()} type.
 -spec auth_opts(hecate_om_service:capability()) -> map().
 auth_opts(#{auth := Policy}) -> #{auth => Policy};
 auth_opts(_)                 -> #{}.

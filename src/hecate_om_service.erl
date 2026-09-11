@@ -1,25 +1,31 @@
-%%% @doc The behaviour every hecate-service implements.
-%%%
-%%% Six required callbacks + two optional ones for CMD/PRJ services
-%%% that own a reckon-db store. Everything else (release packaging,
-%%% container image, Quadlet unit, manifest, health wiring,
-%%% capability advertisement) is handled by the rest of hecate_om
-%%% and by the templates in `templates/'.
-%%%
-%%% When a service exports the optional `store_id/0' + `data_dir/0'
-%%% callbacks, `hecate_om:boot/1' will, before calling
-%%% `ServiceMod:start/1':
-%%%
-%%%   - `reckon_db_sup:start_store/1' with a `single'-mode store at
-%%%     `<data_dir>/<store_id>/',
-%%%   - wait up to 30s for the store to appear in
-%%%     `reckon_db_sup:which_stores/0',
-%%%   - `evoq_store_subscription:start_link/1' so projections + PMs
-%%%     receive events.
-%%%
-%%% Producer-only services (no event store) simply omit both
-%%% callbacks. See `hecate_om_store' for the helper module.
 -module(hecate_om_service).
+-moduledoc """
+The behaviour every hecate-service implements.
+
+Six callbacks are required: `c:info/0`, `c:start/1`, `c:stop/1`,
+`c:health/0`, `c:capabilities/0` and `c:identity_spec/0`. The optional
+callbacks let a service own a reckon-db store, a barrel_docdb read model,
+mesh subscriptions and human-facing capability descriptions. Health wiring,
+capability advertisement and the optional stores are handled by the rest of
+hecate_om; a new service repository (release, Containerfile, CI workflows,
+compose file) is generated with `rebar3 new hecate_service` from
+`priv/templates/hecate_service/`.
+
+When a service exports the optional `c:store_id/0` and `c:data_dir/0`
+callbacks, `hecate_om:boot/1` does the following before it calls
+`ServiceMod:start/1`:
+
+- starts the store at `<data_dir>/<store_id>/` with
+  `reckon_db_sup:start_store/1`, in the mode `c:store_mode/0` names
+  (`single` when it is not exported);
+- waits up to 30s for the store to appear in
+  `reckon_db_sup:which_stores/0`;
+- starts `evoq_store_subscription:start_link/1` so projections and process
+  managers receive events.
+
+Producer-only services (no event store) omit both callbacks. See
+`m:hecate_om_store` for the helper module.
+""".
 
 -type info()           :: #{name := binary(), version := binary(), description := binary()}.
 -type health()         :: ok | {degraded, term()} | {down, term()}.
@@ -63,10 +69,10 @@
 
 -doc "Capabilities this service exposes, to be advertised on the mesh. "
      "Other services find this one by these names. A capability whose "
-     "map includes `handler => {HandlerModule, Args}' (HandlerModule "
-     "implementing the `macula_response' behaviour) is advertised via "
-     "`macula_response:advertise_direct/7' -- discoverable AND directly "
-     "callable. A capability with no `handler' key is written as a "
+     "map includes `handler => {HandlerModule, Args}` (HandlerModule "
+     "implementing the `macula_response` behaviour) is advertised via "
+     "`macula_response:advertise_direct/7` -- discoverable AND directly "
+     "callable. A capability with no `handler` key is written as a "
      "bare discovery record only (today's behavior, kept for services "
      "that advertise a capability another mechanism serves).".
 -callback capabilities() -> [capability()].
@@ -101,9 +107,9 @@
      "store.".
 -callback store_mode() -> single | cluster.
 
--doc "OPTIONAL. The reckon-db integrity config for the store: `disabled' "
+-doc "OPTIONAL. The reckon-db integrity config for the store: `disabled` "
      "(default), or `#{enabled => true, key_source => {env_var, Name} | "
-     "{sealed_file, Path}}' to enable per-store HMAC event tamper-resistance. "
+     "{sealed_file, Path}}` to enable per-store HMAC event tamper-resistance. "
      "When exported, hecate_om:boot/1 threads it into the store config. The "
      "store refuses to start if integrity is enabled but the key cannot be "
      "loaded, so provision the key before enabling.".
@@ -120,23 +126,23 @@
 -callback read_model_id() -> binary().
 
 -doc "OPTIONAL. The barrel_docdb TTL sweep config for this service's read "
-     "model: `disabled' (default, no automatic expiry -- today's behavior "
+     "model: `disabled` (default, no automatic expiry -- today's behavior "
      "for every service), or `#{interval_ms := pos_integer(), batch := "
-     "pos_integer()}' to turn on barrel_docdb's native per-document TTL "
-     "sweeper. `interval_ms' is how often it folds the expiry index; "
-     "`batch' caps how many due documents it hard-deletes per pass. This "
-     "only arms the sweeper -- a document still needs `expires_at' set "
-     "(a unix-ms deadline) in its own `put_doc/3' `Opts' to ever expire; "
-     "omitting it on a write preserves whatever expiry the document "
-     "already had. When exported alongside read_model_id/0 + data_dir/0, "
-     "hecate_om:boot/1 threads this into the database's create_db config. "
-     "Omit for a read model where nothing expires.".
+     "pos_integer()}` to turn on barrel_docdb's native per-document TTL "
+     "sweeper. `interval_ms` is how often it folds the expiry index; "
+     "`batch` caps how many due documents it hard-deletes per pass. This "
+     "only arms the sweeper -- a document still needs `expires_at` set "
+     "(a unix-ms deadline) in its own `barrel_docdb:put_doc/3` `Opts` to "
+     "ever expire; omitting it on a write preserves whatever expiry the "
+     "document already had. When exported alongside read_model_id/0 + "
+     "data_dir/0, hecate_om:boot/1 threads this into the database's "
+     "create_db config. Omit for a read model where nothing expires.".
 -callback read_model_ttl_sweep() -> disabled | #{interval_ms := pos_integer(),
                                                  batch := pos_integer()}.
 
 -doc "OPTIONAL. Topics this service subscribes to at boot: a list of "
      "{Topic, HandlerModule, Args} triples, HandlerModule implementing "
-     "the `macula_subscriber' behaviour. hecate_om:boot/1 wires each "
+     "the `macula_subscriber` behaviour. hecate_om:boot/1 wires each "
      "into a supervised macula_subscriber under hecate_om_pubsub_sup "
      "before the service module's own start/1 runs. Call "
      "hecate_om_pubsub:ensure_subscriptions/1 again whenever the "
@@ -169,7 +175,7 @@
      "(name/version/handler/auth/kind), which says how to route a "
      "call, never what it does. When exported (alongside either this "
      "or describe_pubsub_capabilities/0), hecate_om:boot/1 advertises "
-     "a synthetic `<service-name>.describe_capabilities' RPC that "
+     "a synthetic `<service-name>.describe_capabilities` RPC that "
      "returns both lists live -- so a mesh consumer (e.g. a tooling "
      "catalog) can call it instead of hand-maintaining descriptions.".
 -callback describe_rpc_capabilities() -> [rpc_capability_doc()].

@@ -151,21 +151,21 @@ Stop republishing (because you died) and both effects happen together: the DHT r
 ages out on its own schedule, and this service's mirrored copy ages out on the same
 schedule, because it's the same `expires_at`.
 
-## The one thing to get right that this library doesn't default correctly today
+## Advertisement TTL: what this library sets, and what to set yourself
 
-**If you're serving a capability via `capabilities/0`, check what TTL your own
-advertisement uses.** `hecate_om_capabilities` re-advertises every 30 seconds
-(`macula_response:advertise_direct/7`, re-invoked on a timer) but does not pass
-`ttl_ms` — so the underlying `procedure_advertisement` record falls back to the generic
-envelope default, currently 48 hours. That means a service that dies still has a
-*discoverable, callable-looking* capability advertisement sitting in the DHT for up to two
-days, no matter how often a live instance would have refreshed it. The 30s cadence buys
-freshness for callers of a live service; it does nothing for how fast a dead one's entry
-disappears, because nothing shortened the TTL to match the cadence.
+**A capability you serve via `capabilities/0` ages out within minutes of your service
+dying.** `hecate_om_capabilities` re-advertises it about every 30 seconds
+(`macula_response:advertise_direct/7`, re-invoked on a timer), and every advertisement
+carries a `ttl_ms` of four times that interval, 120 seconds. Without it the underlying
+`procedure_advertisement` record would fall back to the generic envelope default of 48
+hours, and a dead service would keep a *discoverable, callable-looking* advertisement in
+the DHT for up to two days, however often a live instance had refreshed it. For a
+capability with a `handler` this needs macula 10.11.1 or later: earlier releases dropped
+`ttl_ms` while forwarding the advertisement options, so the record got the 48-hour
+default anyway.
 
-If you're calling `advertise_direct` yourself (directly, or via a future `hecate_om`
-change to `hecate_om_capabilities`), pass an explicit `ttl_ms` proportioned to your actual
-republish interval — something like 3–4× the interval, matching the margin
+If you call `advertise_direct` yourself instead, pass an explicit `ttl_ms` proportioned to
+your own republish interval: something like 3 to 4 times the interval, matching the margin
 `macula_station_announcer` already uses for stations (refreshing at 75% of TTL leaves the
 same kind of buffer). Don't rely on the envelope default; it was sized for entities that
 refresh on the order of hours, not seconds.

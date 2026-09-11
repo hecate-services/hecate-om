@@ -14,7 +14,7 @@ Versioning: [SemVer](https://semver.org/).
   tests (`hecate_om_health_listener_tests`) cover the socket options and a
   loopback listener refusing a connection on another interface.
 
-- `hecate_om_service:capability/0`'s `auth` field now includes
+- `t:hecate_om_service:capability/0`'s `auth` field now includes
   `{realm_member_required, RealmDid, RequiredCan}` -- `macula` added this
   policy after `PLAN_UCAN_GATED_CAPABILITIES.md` was written and called
   the realm-membership case unbuilt; `hecate_om_capabilities:auth_opts/1`
@@ -22,7 +22,7 @@ Versioning: [SemVer](https://semver.org/).
   the stale type and moduledoc did. New eunit test
   (`auth_opts_carries_a_realm_member_required_policy_test`) pins the
   round-trip. See the plan doc's own 2026-09-08 update.
-- `hecate_om_service:describe_rpc_capabilities/0` +
+- `c:hecate_om_service:describe_rpc_capabilities/0` +
   `describe_pubsub_capabilities/0` (both optional): human-facing
   documentation for a service's capabilities/topics, distinct from
   `capabilities/0`'s/`subscriptions/0`'s own dispatch-wiring-only
@@ -34,7 +34,7 @@ Versioning: [SemVer](https://semver.org/).
   description list today purely because there was nowhere on the mesh to
   pull this metadata from.
 
-- `hecate_om_service:read_model_ttl_sweep/0` (optional callback): a
+- `c:hecate_om_service:read_model_ttl_sweep/0` (optional callback): a
   service can now arm barrel_docdb's native per-document TTL sweeper on
   its own read model -- `disabled` (default, unchanged behavior for every
   existing service) or `#{interval_ms := pos_integer(), batch :=
@@ -69,6 +69,18 @@ Versioning: [SemVer](https://semver.org/).
   which the next macula release refuses to load. Before, every load error
   generated a new keypair and saved it over the old file, so the service
   silently came back under a new node id and its real key was gone.
+
+- Documentation. `hecate_om_service`'s module doc never reached the
+  generated docs (a module with `-doc` attributes takes its docs from the
+  compiler, which ignores edoc comments); it is now a `-moduledoc`, updated
+  to the current callbacks. Its callback docs used edoc quoting inside
+  markdown and rendered as broken code spans. The read-model services guide
+  is now published (the mesh-native services guide already linked to it),
+  with its advertisement TTL section corrected to what
+  `hecate_om_capabilities` does today, and the README no longer describes
+  the removed `templates/` directory. References to private macula
+  functions and to functions that do not exist are no longer written as
+  links, so `rebar3 ex_doc` builds without warnings.
 
 ## [0.24.0] - 2026-09-05
 
@@ -171,8 +183,8 @@ Versioning: [SemVer](https://semver.org/).
   identity out of a decoded payload (`field(caller, Payload)` under one
   well-known name, same reasoning `field/2,3` itself already gives for
   existing as a shared helper). Only populated by macula >= 10.15.0,
-  which is the version that first merges `caller` into `Payload` in
-  `macula_station_link:handle_inbound_call/2` -- on an older macula this
+  which is the version that first merges `caller` into `Payload` when
+  macula's station link handles an inbound call -- on an older macula this
   reads `undefined`, same as any other absent field.
 
 ## [0.21.0] - 2026-09-01
@@ -271,7 +283,7 @@ Versioning: [SemVer](https://semver.org/).
   (bare + org-qualified) through `macula_streamer` instead of
   `macula_response` for a streamer-kind capability -- both provider
   modules publish the identical
-  `procedure_advertisement` DHT record and read the same `Opts' keys
+  `procedure_advertisement` DHT record and read the same `Opts` keys
   (`ttl_ms`, `reuse_sup`, `cert_chain`), so this changes only which
   module gets called. New `provider_module/1` and `stream_opts/1`
   (exported, pure). `call_capability/5,7` (the direct-dial CALL path)
@@ -338,8 +350,9 @@ Versioning: [SemVer](https://semver.org/).
   the live fleet's DHT `procedure_advertisement` records carry uppercase hex.
   Since `SHA-256(uppercase) != SHA-256(lowercase)`, direct-dial resolvers
   looked up the wrong DHT key. Changed all three call sites to
-  `binary:encode_hex(Realm, uppercase)`, matching `macula_direct_dial:discovery_uri/2`
-  (fixed in macula 10.14.4) and macula-go/macula-rust/macula-dotnet.
+  `binary:encode_hex(Realm, uppercase)`, matching the discovery URI
+  `macula_direct_dial` builds (fixed in macula 10.14.4) and
+  macula-go/macula-rust/macula-dotnet.
 
 ## [0.16.3] - 2026-08-31
 
@@ -451,8 +464,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Changed
 
-- Bumped `macula` dependency 10.10.0 -> 10.13.1: `macula_direct_dial:adv_opts/1`
-  no longer silently drops `ttl_ms`; `macula_client`'s connection pool no
+- Bumped `macula` dependency 10.10.0 -> 10.13.1: `adv_opts/1` in
+  `macula_direct_dial` no longer silently drops `ttl_ms`; `macula_client`'s connection pool no
   longer dials a redundant duplicate connection to a station it already
   holds a live link to under a different seed spelling (was reproducible,
   live, as literally the second `call_station` from one pool to the same
@@ -625,7 +638,7 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
-- `hecate_om:call_capability/3` — call a capability by name over the direct-dial
+- `call_capability/3` in `hecate_om` — call a capability by name over the direct-dial
   data path: resolve a provider from the DHT (`procedure_advertisement`), resolve
   its serving station to a dialable endpoint (`station_endpoint`), dial it directly
   and CALL the raw `CapName` there, failing over to the next provider on error.
@@ -666,8 +679,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Removed
 
-- The pubsub `_mesh.cap.announce' publish/subscribe path and `peers/0`. There
-  were no callers of the old `lookup/1' summary shape.
+- The pubsub `_mesh.cap.announce` publish/subscribe path and `peers/0`. There
+  were no callers of the old `lookup/1` summary shape.
 
 ## [0.10.0] - 2026-08-13
 
