@@ -5,6 +5,8 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-09-11
+
 ### Added
 
 - `health_ip` (optional): the address the `/health` listener binds, as a
