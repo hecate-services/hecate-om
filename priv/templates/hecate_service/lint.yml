@@ -9,9 +9,11 @@
 
 name: lint-and-test
 
+# A push on any branch runs these checks, so a CI change can be proven on a
+# branch before it reaches main. This job builds no image: build-push.yml
+# stays on main and tags only.
 on:
   push:
-    branches: [main]
   pull_request:
   workflow_dispatch:
 
