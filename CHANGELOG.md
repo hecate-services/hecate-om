@@ -7,6 +7,13 @@ Versioning: [SemVer](https://semver.org/).
 
 ### Added
 
+- `health_ip` (optional): the address the `/health` listener binds, as a
+  string such as `"127.0.0.1"` or an address tuple. Unset or empty, the
+  listener binds every interface, as before. A service whose health is only
+  probed from inside its own container or host sets `"127.0.0.1"`. New eunit
+  tests (`hecate_om_health_listener_tests`) cover the socket options and a
+  loopback listener refusing a connection on another interface.
+
 - `hecate_om_service:capability/0`'s `auth` field now includes
   `{realm_member_required, RealmDid, RequiredCan}` -- `macula` added this
   policy after `PLAN_UCAN_GATED_CAPABILITIES.md` was written and called
