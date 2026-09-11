@@ -50,6 +50,31 @@ binary_key_with_no_existing_atom_form_does_not_raise_test() ->
     ?assertEqual(<<"still findable via the binary form">>,
                  hecate_om_wire:field(NoAtomForm, Payload)).
 
+%% macula encodes every map key as CBOR text, and its frame decoder turns
+%% one back into an atom only when that atom already exists in the
+%% receiving VM. Otherwise the key arrives as `{text, Bin}', and field/2,3
+%% must find it from either kind of key literal.
+text_key_found_from_an_atom_literal_test() ->
+    ?assertEqual(<<"pong">>,
+                 hecate_om_wire:field(ping, #{{text, <<"ping">>} => <<"pong">>})).
+
+text_key_found_from_a_binary_literal_test() ->
+    ?assertEqual(<<"pong">>,
+                 hecate_om_wire:field(<<"ping">>, #{{text, <<"ping">>} => <<"pong">>})).
+
+text_key_with_no_existing_atom_form_is_found_test() ->
+    NoAtomForm = <<"hecate_om_wire_tests_text_key_never_an_atom_anywhere_zzz">>,
+    Payload = #{{text, NoAtomForm} => {text, <<"found">>}},
+    ?assertEqual(<<"found">>, hecate_om_wire:field(NoAtomForm, Payload)),
+    ?assertEqual(none, hecate_om_wire:field(NoAtomForm, #{}, none)).
+
+text_key_is_tried_after_the_atom_and_binary_forms_test() ->
+    AtomAndText = #{ping => atom_form, {text, <<"ping">>} => text_form},
+    BinaryAndText = #{<<"ping">> => binary_form, {text, <<"ping">>} => text_form},
+    ?assertEqual(atom_form, hecate_om_wire:field(ping, AtomAndText)),
+    ?assertEqual(binary_form, hecate_om_wire:field(ping, BinaryAndText)),
+    ?assertEqual(binary_form, hecate_om_wire:field(<<"ping">>, BinaryAndText)).
+
 %%% unwrap/1 -- found live 2026-09-01: a JSON string sent as an RPC arg
 %%% decodes to `{text, Bin}' (CBOR text string, major type 3), not a
 %%% bare binary, per macula_record_cbor's own documented value()

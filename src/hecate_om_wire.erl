@@ -5,7 +5,11 @@
 %%% Gotcha one -- KEYS: macula's frame decoder round-trips a payload's
 %%% keys through `binary_to_existing_atom/1' on the way in, so a caller
 %%% that sent binary keys can find them waiting as atoms on the other
-%%% side. Three incompatible ways of coping with this were already live
+%%% side. A key whose atom does not exist in the receiving VM stays as it
+%%% was sent instead: `{text, Bin}', since macula encodes every map key
+%%% as CBOR text (`macula_frame''s `wire_key/1' and `envelope_key/1'), or
+%%% a plain binary from a sender that used a byte-string key. Three
+%%% incompatible ways of coping with this were already live
 %%% in the workspace when this was written (see
 %%% `hecate-om/plans/PLAN_HECATE_OM_MESH_WRAPPERS.md', piece F):
 %%% `hecate-embedder' tries the atom form first, falling back to binary;
@@ -32,10 +36,11 @@
 %%% `field/2,3' accepts either an atom or a binary key literal, whichever
 %%% the caller naturally reaches for. Either way the atom form is tried
 %%% first (the confirmed-live shape for both RPC/stream args and pubsub
-%%% payloads, piece C/D's own live tests), the binary form second -- and
-%%% whatever value is found (or the caller's own `Default') is run
-%%% through `unwrap/1' before returning, so both gotchas are resolved in
-%%% one call regardless of which one a given field happens to hit.
+%%% payloads, piece C/D's own live tests), then the binary form, then
+%%% `{text, Bin}'. Whatever value is found (or the caller's own
+%%% `Default') is run through `unwrap/1' before returning, so both
+%%% gotchas are resolved in one call regardless of which one a given
+%%% field happens to hit.
 %%%
 %%% `retryable/1' (piece G) is the response-side counterpart: whether a
 %%% failed RPC/stream call outcome is worth retrying, per macula's own
@@ -55,22 +60,27 @@
 field(Key, Payload) ->
     field(Key, Payload, undefined).
 
-%% @doc Look up `Key' in `Payload', trying both the atom and binary form
-%% of `Key' regardless of which one the caller passed in, and unwrapping
-%% whatever value is found (see `unwrap/1'). Returns `unwrap(Default)'
-%% if neither form is present -- a no-op for the plain Erlang term a
-%% caller's own literal `Default' almost always already is.
+%% @doc Look up `Key' in `Payload', trying its atom, binary and
+%% `{text, Bin}' forms in that order regardless of which one the caller
+%% passed in, and unwrapping whatever value is found (see `unwrap/1').
+%% Returns `unwrap(Default)' if no form is present, a no-op for the
+%% plain Erlang term a caller's own literal `Default' almost always
+%% already is.
 -spec field(atom() | binary(), map(), term()) -> term().
 field(Key, Payload, Default) when is_atom(Key) ->
-    lookup(Key, atom_to_binary(Key, utf8), Payload, Default);
+    BinKey = atom_to_binary(Key, utf8),
+    lookup([Key, BinKey, {text, BinKey}], Payload, Default);
 field(Key, Payload, Default) when is_binary(Key) ->
-    lookup(existing_atom(Key), Key, Payload, Default).
+    lookup([existing_atom(Key), Key, {text, Key}], Payload, Default).
 
-lookup(AtomKey, BinKey, Payload, Default) ->
-    case maps:find(AtomKey, Payload) of
-        {ok, Value} -> unwrap(Value);
-        error -> unwrap(maps:get(BinKey, Payload, Default))
-    end.
+%% The first key form present in `Payload' wins.
+lookup([], _Payload, Default) ->
+    unwrap(Default);
+lookup([Key | Rest], Payload, Default) ->
+    found(maps:find(Key, Payload), Rest, Payload, Default).
+
+found({ok, Value}, _Rest, _Payload, _Default) -> unwrap(Value);
+found(error, Rest, Payload, Default) -> lookup(Rest, Payload, Default).
 
 %% @doc Recursively unwrap `macula_record_cbor''s wire-level value
 %% representation into the plain Erlang terms a handler actually wants

@@ -44,6 +44,17 @@ Versioning: [SemVer](https://semver.org/).
   duplicated a primitive barrel_docdb (`~> 1.3`, already the pinned
   dependency) already provides natively.
 
+### Fixed
+
+- `hecate_om_wire:field/2,3` now also finds a key that arrives as
+  `{text, Bin}`. macula encodes every map key as CBOR text, and its frame
+  decoder turns a key back into an atom only when that atom already exists
+  in the receiving VM, so a key can arrive as `{text, Bin}` and `field/2,3`
+  returned the default as if the field were absent. The lookup order is
+  now the atom form, the binary form, then `{text, Bin}`. Releases that
+  boot in embedded mode hid this, because every module a service names is
+  loaded, and so every atom exists, before the first call arrives.
+
 ## [0.24.0] - 2026-09-05
 
 ### Fixed
