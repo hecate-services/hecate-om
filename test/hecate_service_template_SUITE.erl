@@ -42,6 +42,10 @@
 %% makes leaked_house_specifics/1 able to prove the scaffold is usable by one.
 -define(ORG,      "acme-widgets").
 -define(REGISTRY, "registry.example.test").
+%% The only refs that may publish an image. A manual run anywhere else checks
+%% and publishes nothing.
+-define(PUBLISH_REFS,
+        "github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')").
 
 all() ->
     [generates_every_expected_file,
@@ -245,15 +249,70 @@ generated_workflow_keeps_actions_syntax(Config) ->
 %% need the checks, and the checks must include xref: the compiler's
 %% warnings_as_errors does not see a call to a function that does not exist in
 %% another module, and xref does.
+%%
+%% THE GATE IS STRUCTURE, NOT SPELLING. A substring check still passes when
+%% `needs: check' sits on the wrong job, or when an `if: always()' or a
+%% continue-on-error lets the image job run past a failed check. So the
+%% generated workflows are read by job: the image job needs the check job and
+%% publishes only from main or a v* tag, the check job is lint.yml, nothing
+%% continues on error, and lint.yml's own job cannot be skipped.
 generated_image_waits_for_the_checks(Config) ->
     Root = ?config(root, Config),
-    Push = read(filename:join(Root, ".github/workflows/build-push.yml")),
-    Lint = read(filename:join(Root, ".github/workflows/lint.yml")),
-    ?assertNotEqual(nomatch,
-                    binary:match(Push, <<"uses: ./.github/workflows/lint.yml">>)),
-    ?assertNotEqual(nomatch, binary:match(Push, <<"needs: check">>)),
-    ?assertNotEqual(nomatch, binary:match(Lint, <<"workflow_call:">>)),
-    ?assertNotEqual(nomatch, binary:match(Lint, <<"rebar3 xref">>)).
+    Push = lines(read(filename:join(Root, ".github/workflows/build-push.yml"))),
+    Lint = lines(read(filename:join(Root, ".github/workflows/lint.yml"))),
+    Image = job(Push, "build-and-push"),
+    ?assertEqual({ok, "./.github/workflows/lint.yml"}, key(job(Push, "check"), "uses")),
+    ?assertEqual({ok, "check"}, key(Image, "needs")),
+    ?assertEqual({ok, ?PUBLISH_REFS}, key(Image, "if")),
+    ?assertEqual([], [L || L <- Push ++ Lint, string:find(L, "continue-on-error") =/= nomatch]),
+    LintCheck = job(Lint, "check"),
+    ?assertEqual(none, key(LintCheck, "if")),
+    ?assert(lists:member("  workflow_call:", top(Lint, "on"))),
+    ?assert(lists:any(fun(L) -> string:find(L, "rebar3 xref") =/= nomatch end, LintCheck)),
+    %% The default token stays read-only in both files, and only the image job
+    %% asks to write packages.
+    ?assertEqual(["  contents: read"], content(top(Push, "permissions"))),
+    ?assertEqual(["  contents: read"], content(top(Lint, "permissions"))),
+    Writes = fun(Ls) -> [L || L <- Ls, string:find(L, "packages: write") =/= nomatch] end,
+    ?assertEqual(1, length(Writes(Image))),
+    ?assertEqual(Writes(Image), Writes(Push ++ Lint)).
+
+%% Just enough of a reader for the generated workflows, whose layout the
+%% template fixes: top-level keys at column 0, jobs at two spaces, a job's own
+%% keys at four. Blank lines and comments never end a block.
+lines(Bin) ->
+    string:split(unicode:characters_to_list(Bin), "\n", all).
+
+top(Lines, Key) ->
+    block(Lines, Key ++ ":", 0).
+
+job(Lines, Name) ->
+    block(top(Lines, "jobs"), "  " ++ Name ++ ":", 2).
+
+block(Lines, Header, Indent) ->
+    case lists:dropwhile(fun(L) -> string:trim(L, trailing) =/= Header end, Lines) of
+        []         -> ct:fail({no_block, Header});
+        [_ | Rest] -> lists:takewhile(fun(L) -> not ends_block(L, Indent) end, Rest)
+    end.
+
+%% A block's lines without blanks and comments.
+content(Lines) ->
+    [L || L <- Lines,
+          string:trim(L) =/= "",
+          hd(string:trim(L, leading)) =/= $#].
+
+ends_block(Line, Indent) ->
+    Text = string:trim(Line, leading),
+    Text =/= "" andalso hd(Text) =/= $# andalso length(Line) - length(Text) =< Indent.
+
+%% A job's own key, or none. Two of the same key fail the match on purpose.
+key(JobLines, Key) ->
+    Prefix = "    " ++ Key ++ ": ",
+    case [string:trim(lists:nthtail(length(Prefix), L), trailing)
+          || L <- JobLines, lists:prefix(Prefix, L)] of
+        [Value] -> {ok, Value};
+        []      -> none
+    end.
 
 %% THE SCAFFOLD MUST BE USABLE BY SOMEONE WHO IS NOT US, and the first version
 %% was not: it hardcoded our organisation, our registry, our GitOps repository

@@ -42,6 +42,9 @@ jobs:
 
   build-and-push:
     needs: check
+    # Only main and v* tags publish. A manual run on any other branch still runs
+    # the checks and publishes nothing, so :latest never carries unmerged code.
+    if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: read

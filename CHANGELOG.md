@@ -13,9 +13,12 @@ Versioning: [SemVer](https://semver.org/).
   image. `lint.yml` runs on pushes to branches other than `main` and on pull
   requests, so the checks run once per commit, and it gains `rebar3 xref`: the
   compiler's `warnings_as_errors` does not see a call to a function that does not
-  exist in another module. Both workflows set a read-only default token; only the
-  image job asks for `packages: write`. A new template suite case,
-  `generated_image_waits_for_the_checks`, fails if either part is dropped.
+  exist in another module. Only `main` and `v*` tags publish: a manual run on any
+  other branch runs the checks and publishes nothing, so `:latest` never carries
+  unmerged code. Both workflows set a read-only default token; only the image job
+  asks for `packages: write`. A new template suite case,
+  `generated_image_waits_for_the_checks`, reads the generated workflows job by job
+  and fails if any part of the gate is dropped.
 
 ## [0.25.0] - 2026-09-11
 
