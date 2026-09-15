@@ -14,8 +14,9 @@
 # This template said 27 from the beginning and nothing revisited it, so every
 # service scaffolded from it inherited 27 while development machines moved on.
 # In `hecate-biotope' that cost three commits of red CI on a crash that does not
-# occur on the development release at all, and because `build-push.yml' is a
-# separate workflow the image shipped to the fleet regardless.
+# occur on the development release at all, and because `build-push.yml' was then
+# a separate workflow the image shipped to the fleet regardless. It now runs
+# `lint.yml''s checks as its first job and builds only when they pass.
 FROM docker.io/erlang:28-alpine AS builder
 WORKDIR /build
 

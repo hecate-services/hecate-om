@@ -32,8 +32,8 @@ README for how to install the template.
 ├── scripts/
 │   └── health.sh
 └── .github/workflows/
-    ├── lint.yml                 ← rebar3 lint + eunit
-    └── build-push.yml           ← image publish on main + tags
+    ├── lint.yml                 ← rebar3 lint + xref + eunit
+    └── build-push.yml           ← those checks, then image publish on main + tags
 ```
 
 A service that grows vertical slices adds them as further apps under

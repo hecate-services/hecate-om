@@ -9,13 +9,20 @@
 
 name: lint-and-test
 
-# A push on any branch runs these checks, so a CI change can be proven on a
-# branch before it reaches main. This job builds no image: build-push.yml
-# stays on main and tags only.
+# A push to any branch other than main, and every pull request, runs these
+# checks, so a CI change can be proven on a branch before it reaches main. On
+# main and on v* tags, build-push.yml runs this same workflow as its first job
+# and builds the image only when it passes, so the checks run once there too.
 on:
   push:
+    branches-ignore: [main]
   pull_request:
   workflow_dispatch:
+  workflow_call:
+
+# The default token is read-only; these checks write nothing.
+permissions:
+  contents: read
 
 jobs:
   check:
@@ -50,4 +57,8 @@ jobs:
             | sh -s -- -y --default-toolchain stable --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - run: rebar3 lint
+      # xref finds a call to a function that does not exist in another module,
+      # which the compiler's warnings_as_errors does not, and build-push.yml
+      # must not publish an image from such a commit.
+      - run: rebar3 xref
       - run: rebar3 eunit

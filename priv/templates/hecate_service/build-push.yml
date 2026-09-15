@@ -4,6 +4,11 @@
 # under watchtower for zero-touch deploys, and the semver tags stay published so a
 # bad release can be pinned back to a known one.
 #
+# THE IMAGE WAITS FOR THE CHECKS. The first job runs lint.yml (lint, xref,
+# eunit) and the image job needs it, so a commit whose checks fail never
+# publishes an image and watchtower never rolls it. A separate publish workflow
+# that waited on nothing shipped three red commits of hecate-biotope.
+#
 # NOTE ON PUSHING THIS FILE. An HTTPS push that creates or updates anything under
 # .github/workflows/ needs a token carrying the `workflow' scope, and the error
 # names the FILE rather than the missing scope. Use an SSH remote and the problem
@@ -17,6 +22,11 @@ on:
     tags:     ['v*']
   workflow_dispatch:
 
+# The default token is read-only. Only the image job, which pushes to the
+# registry, asks for more.
+permissions:
+  contents: read
+
 # ONE IMAGE BUILD IN FLIGHT PER REF. Every push to main builds and pushes
 # :latest; without this, three quick commits run three builds that finish in
 # whatever order the runners please, and :latest ends up being whichever
@@ -27,7 +37,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  check:
+    uses: ./.github/workflows/lint.yml
+
   build-and-push:
+    needs: check
     runs-on: ubuntu-latest
     permissions:
       contents: read

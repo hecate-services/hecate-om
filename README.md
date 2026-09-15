@@ -215,7 +215,8 @@ Generates a repository that compiles, tests and deploys:
 - `Containerfile` (multi-stage, macula's QUIC NIF built from source)
 - `deploy/docker-compose.yml` — the service's own run contract, **not** the
   deployed file; fleet placement lives in `macula-demo`
-- `.github/workflows/` — `lint-and-test` and `build-push` to ghcr.io
+- `.github/workflows/` — `lint-and-test` (lint, xref, eunit), and `build-push`,
+  which runs those checks first and publishes to ghcr.io only when they pass
 - `scripts/health.sh`, executable
 - `README.md`, `CHANGELOG.md`, `LICENSE`, `.gitignore`
 

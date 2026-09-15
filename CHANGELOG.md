@@ -5,6 +5,18 @@ Versioning: [SemVer](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- The `hecate_service` scaffold's image waits for its checks.
+  `build-push.yml`'s first job now runs `lint.yml` as a reusable workflow, and
+  the image job needs it, so a commit whose checks fail never publishes an
+  image. `lint.yml` runs on pushes to branches other than `main` and on pull
+  requests, so the checks run once per commit, and it gains `rebar3 xref`: the
+  compiler's `warnings_as_errors` does not see a call to a function that does not
+  exist in another module. Both workflows set a read-only default token; only the
+  image job asks for `packages: write`. A new template suite case,
+  `generated_image_waits_for_the_checks`, fails if either part is dropped.
+
 ## [0.25.0] - 2026-09-11
 
 ### Added

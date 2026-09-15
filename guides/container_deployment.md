@@ -41,9 +41,11 @@ which names nothing and sends you looking in the wrong place.
 ## CI publish
 
 `.github/workflows/build-push.yml` triggers on pushes to `main`,
-publishing `:latest`, and on `vX.Y.Z` tags, publishing `:X.Y.Z`. Both
-tags are pushed every time, so `:latest` can drive zero-touch updates
-while the semver tags remain for pinning.
+publishing `:latest`, and on `vX.Y.Z` tags, publishing `:X.Y.Z`. Its
+first job runs `lint.yml`'s checks (lint, xref, eunit), and the image is
+built only when they pass, so a commit with failing checks never
+publishes an image. Both tags are pushed every time, so `:latest` can
+drive zero-touch updates while the semver tags remain for pinning.
 
 One trap when pushing that file itself: an **HTTPS** push that creates
 or updates anything under `.github/workflows/` needs a token carrying

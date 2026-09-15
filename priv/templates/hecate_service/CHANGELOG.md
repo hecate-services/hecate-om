@@ -18,6 +18,7 @@ this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 - `Containerfile` building an alpine image, with macula's QUIC NIF compiled from
   source rather than fetched against a foreign libc.
 - `deploy/docker-compose.yml`, the service's own run contract.
-- CI: `lint-and-test` on every push and pull request, `build-and-push` to
-  the registry on `main` and on `v*` tags, publishing both `:latest` and the semver
-  tag.
+- CI: `lint-and-test` (lint, xref, eunit) on every push to a branch other than
+  `main` and on pull requests. `build-and-push` on `main` and on `v*` tags runs the
+  same checks first and publishes both `:latest` and the semver tag only when they
+  pass.
