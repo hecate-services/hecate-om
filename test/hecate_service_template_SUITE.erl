@@ -29,6 +29,7 @@
          sys_config_configures_a_stable_identity/1,
          no_unrendered_variable_survives/1,
          generated_workflow_keeps_actions_syntax/1,
+         generated_image_waits_for_the_checks/1,
          leaks_no_house_specifics/1,
          generated_sources_satisfy_the_behaviour/1,
          generated_service_reports_the_scaffolded_names/1]).
@@ -48,6 +49,7 @@ all() ->
      sys_config_configures_a_stable_identity,
      no_unrendered_variable_survives,
      generated_workflow_keeps_actions_syntax,
+     generated_image_waits_for_the_checks,
      leaks_no_house_specifics,
      generated_sources_satisfy_the_behaviour,
      generated_service_reports_the_scaffolded_names].
@@ -236,6 +238,22 @@ generated_workflow_keeps_actions_syntax(Config) ->
                     binary:match(Body, <<"${{ secrets.GITHUB_TOKEN }}">>)),
     ?assertNotEqual(nomatch,
                     binary:match(Body, <<"${{ steps.tag.outputs.tag }}">>)).
+
+%% A SEPARATE PUBLISH WORKFLOW SHIPS A RED COMMIT. In hecate-biotope the tests
+%% went red for three commits while build-push.yml, which waited on nothing,
+%% kept publishing :latest and watchtower kept rolling it. The image job must
+%% need the checks, and the checks must include xref: the compiler's
+%% warnings_as_errors does not see a call to a function that does not exist in
+%% another module, and xref does.
+generated_image_waits_for_the_checks(Config) ->
+    Root = ?config(root, Config),
+    Push = read(filename:join(Root, ".github/workflows/build-push.yml")),
+    Lint = read(filename:join(Root, ".github/workflows/lint.yml")),
+    ?assertNotEqual(nomatch,
+                    binary:match(Push, <<"uses: ./.github/workflows/lint.yml">>)),
+    ?assertNotEqual(nomatch, binary:match(Push, <<"needs: check">>)),
+    ?assertNotEqual(nomatch, binary:match(Lint, <<"workflow_call:">>)),
+    ?assertNotEqual(nomatch, binary:match(Lint, <<"rebar3 xref">>)).
 
 %% THE SCAFFOLD MUST BE USABLE BY SOMEONE WHO IS NOT US, and the first version
 %% was not: it hardcoded our organisation, our registry, our GitOps repository
