@@ -187,8 +187,11 @@ a hand-rolled `rebar3 new` with a mismatched pair still fails on its first test
 run.
 
 To use `rebar3 new` directly, install the templates once. rebar3 only finds
-custom templates under `~/.config/rebar3/templates`, and an empty directory has
-no dependencies to carry them there:
+custom templates in its global config directory, and an empty directory has no
+dependencies to carry them there. That directory is `~/.config/rebar3/templates`
+unless `REBAR_GLOBAL_CONFIG_DIR` or `REBAR_CACHE_DIR` is set, in which case it is
+`.config/rebar3/templates` under the first of those that is set.
+`install-templates.sh` links the templates into whichever one rebar3 reads:
 
 ```bash
 scripts/install-templates.sh          # symlinks; --remove to undo

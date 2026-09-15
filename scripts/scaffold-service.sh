@@ -57,13 +57,25 @@ fi
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# rebar3 only finds custom templates under ~/.config/rebar3/templates, and an
-# empty directory has no dependencies to carry them there, so they must be
-# installed on the machine. Do it rather than fail with rebar3's "template not
-# found", which does not hint at the cause.
-if [ ! -e "${HOME}/.config/rebar3/templates/hecate_service.template" ]; then
+# rebar3 only finds custom templates in its global config directory (see
+# install-templates.sh for where that is), and an empty directory has no
+# dependencies to carry them there, so they must be installed on the machine.
+# Ask rebar3 itself whether it lists the template rather than guess at the
+# directory, and install when it does not, rather than fail with rebar3's
+# "template not found", which does not hint at the cause.
+templates_visible() {
+    local listed
+    listed="$(rebar3 new help 2>/dev/null | sed 's/\x1b\[[0-9;]*m//g' || true)"
+    grep -q '^hecate_service (custom)' <<< "${listed}"
+}
+
+if ! templates_visible; then
     echo "[scaffold] installing templates first"
     "${HERE}/install-templates.sh" >/dev/null
+    if ! templates_visible; then
+        echo "rebar3 still does not list hecate_service after installing; see scripts/install-templates.sh" >&2
+        exit 69
+    fi
 fi
 
 echo "[scaffold] ${REPO_NAME} (app ${APP_NAME}, ${REGISTRY}/${ORG}, health port ${HEALTH_PORT})"

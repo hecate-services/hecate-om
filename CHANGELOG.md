@@ -20,6 +20,17 @@ Versioning: [SemVer](https://semver.org/).
   `generated_image_waits_for_the_checks`, reads the generated workflows job by job
   and fails if any part of the gate is dropped.
 
+### Fixed
+
+- `scripts/install-templates.sh`, `scripts/scaffold-service.sh` and the
+  template suite look for rebar3's template directory where rebar3 does: under
+  `REBAR_GLOBAL_CONFIG_DIR`, else `REBAR_CACHE_DIR`, else `HOME`. With either
+  variable exported they used to install under `HOME`, where `rebar3 new` does
+  not look, so scaffolding failed with "template not found" and the suite
+  skipped every case. A variable set to the empty string is refused.
+  `scaffold-service.sh` now asks `rebar3 new help` whether it lists the
+  template instead of checking a path.
+
 ## [0.25.0] - 2026-09-11
 
 ### Added

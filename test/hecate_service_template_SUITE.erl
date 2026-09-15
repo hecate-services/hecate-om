@@ -94,19 +94,42 @@ end_per_suite(Config) ->
 
 %%% SANDBOXING HOME LOOKED RIGHT AND WAS WRONG, TWICE, so the reason for doing it
 %%% this way is recorded rather than rediscovered. rebar3 resolves its global
-%%% config from `init:get_argument(home)', so a private HOME is what would
-%%% redirect template lookup. But on a machine where rebar3 is an asdf shim, that
-%%% same override breaks asdf: it looks for its installs under $HOME/.asdf and
-%%% exits 126, and then for its version selection in $HOME/.tool-versions and
-%%% exits with "No version is set". Chasing that means teaching a test about a
-%%% version manager.
+%%% config under HOME unless a variable says otherwise (see below), so a private
+%%% HOME is what would redirect template lookup. But on a machine where rebar3 is
+%%% an asdf shim, that same override breaks asdf: it looks for its installs under
+%%% $HOME/.asdf and exits 126, and then for its version selection in
+%%% $HOME/.tool-versions and exits with "No version is set". Chasing that means
+%%% teaching a test about a version manager.
 %%%
 %%% So the suite installs into the real rebar3 template directory and removes
 %%% exactly what it added. It works the same on a laptop and in a bare CI
 %%% container, and it exercises the installation path the humans use.
+%%%
+%%% THE REAL TEMPLATE DIRECTORY IS NOT ALWAYS UNDER HOME. rebar3 3.27 takes its
+%%% global config directory as <base>/.config/rebar3, where base is
+%%% REBAR_GLOBAL_CONFIG_DIR, else REBAR_CACHE_DIR, else HOME. Linking under HOME
+%%% while either variable is exported puts the templates where `rebar3 new' does
+%%% not look: init_per_suite fails with "Template 'hecate_service' not found"
+%%% and every case is skipped. So the base is resolved in rebar3's own order. A
+%%% variable set to the empty string still wins in rebar3 and then names a path
+%%% relative to wherever rebar3 runs, which is nowhere this suite can install to
+%%% and clean up, so the suite fails and names the variable.
 templates_dir() ->
+    filename:join([rebar3_config_base(), ".config", "rebar3", "templates"]).
+
+rebar3_config_base() ->
+    rebar3_config_base([{Var, os:getenv(Var)}
+                        || Var <- ["REBAR_GLOBAL_CONFIG_DIR", "REBAR_CACHE_DIR"]]).
+
+rebar3_config_base([{_Var, false} | Rest]) ->
+    rebar3_config_base(Rest);
+rebar3_config_base([{Var, ""} | _]) ->
+    ct:fail({set_but_empty, Var});
+rebar3_config_base([{_Var, Base} | _]) ->
+    Base;
+rebar3_config_base([]) ->
     {ok, [[Home]]} = init:get_argument(home),
-    filename:join([Home, ".config", "rebar3", "templates"]).
+    Home.
 
 %% Returns the paths created, so end_per_suite removes those and nothing else.
 %% Symlinks, so an edit to a template in this checkout is what the next run sees.

@@ -1,11 +1,18 @@
 #!/usr/bin/env bash
 # Make `rebar3 new hecate_service' available on this machine.
 #
-# rebar3 discovers custom templates in ~/.config/rebar3/templates, and only
-# there when you are standing in an empty directory with no rebar.config, which
-# is exactly the situation you are in when scaffolding a new service. So the
-# templates cannot simply be carried by the hecate_om dependency: nothing has
-# fetched it yet.
+# rebar3 discovers custom templates only in its global config directory, and
+# only there when you are standing in an empty directory with no rebar.config,
+# which is exactly the situation you are in when scaffolding a new service. So
+# the templates cannot simply be carried by the hecate_om dependency: nothing
+# has fetched it yet.
+#
+# THAT DIRECTORY IS NOT ALWAYS UNDER HOME. rebar3 takes it as
+# <base>/.config/rebar3, where base is REBAR_GLOBAL_CONFIG_DIR, else
+# REBAR_CACHE_DIR, else HOME. Installing under HOME while either variable is
+# exported leaves `rebar3 new hecate_service' failing with "template not found".
+# A variable set to the empty string still wins in rebar3 and then names a path
+# relative to wherever rebar3 runs, so that is refused here rather than guessed.
 #
 # SYMLINKS RATHER THAN COPIES, so editing a template in this checkout takes
 # effect immediately and there is one copy to keep right. That is the failure
@@ -21,7 +28,13 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC="${REPO}/priv/templates"
-DEST="${HOME}/.config/rebar3/templates"
+for var in REBAR_GLOBAL_CONFIG_DIR REBAR_CACHE_DIR; do
+    if [ -n "${!var+set}" ] && [ -z "${!var}" ]; then
+        echo "${var} is set but empty; unset it or name a directory" >&2
+        exit 1
+    fi
+done
+DEST="${REBAR_GLOBAL_CONFIG_DIR-${REBAR_CACHE_DIR-${HOME}}}/.config/rebar3/templates"
 
 if [ ! -d "${SRC}" ]; then
     echo "no templates at ${SRC}" >&2
